@@ -1,6 +1,49 @@
-from app.graph import graph
+from app.graph import build_graph
+
+from conftest import FakeProvider
+from test_planner import _kwargs  # 复用 Task 8 的假检索器注入（含 weather_fn）
+
+ITINERARY = {
+    "days": [{"day": 1, "title": "熊猫基地", "weather_note": "晴",
+              "items": [{"time": "09:00", "name": "宽窄巷子", "poi_id": "chengdu-001", "note": ""}]}],
+    "summary": "OK", "warnings": [],
+}
 
 
-def test_empty_graph_runs():
-    result = graph.invoke({"messages": [], "phase": ""})
-    assert result["phase"] == "ready"
+def _fake() -> FakeProvider:
+    return FakeProvider(
+        json_responses={
+            "已有画像": {
+                "destination": "成都", "duration_days": 1, "start_date": None,
+                "budget_cny": 8000, "travelers": 2, "preferences": ["美食"],
+                "missing": [],
+            },
+            "行程": ITINERARY,
+        }
+    )
+
+
+def test_full_planning_flow():
+    graph = build_graph(_fake(), **_kwargs())  # type: ignore[arg-type]
+    result = graph.invoke({
+        "messages": [{"role": "user", "content": "10月去成都玩3天，预算8000"}],
+        "phase": "",
+    })
+    assert result["phase"] == "answered"
+    assert result["itinerary"]["days"][0]["items"][0]["poi_id"] == "chengdu-001"
+    assert result["last_reply"].startswith("## ")
+
+
+def test_incomplete_request_ends_at_analyst():
+    fake = FakeProvider(json_responses={"最新需求": {
+        "destination": None, "duration_days": 3, "start_date": None,
+        "budget_cny": None, "travelers": 1, "preferences": [],
+        "missing": ["destination"],
+    }})
+    graph = build_graph(fake, **_kwargs())  # type: ignore[arg-type]
+    result = graph.invoke({
+        "messages": [{"role": "user", "content": "帮我规划3天"}],
+        "phase": "",
+    })
+    assert result["phase"] == "asking"
+    assert "想去哪个城市" in result["messages"][-1]["content"]
