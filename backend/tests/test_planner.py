@@ -125,6 +125,17 @@ def test_planner_filters_hallucinated_poi():
     assert out["itinerary"]["days"][0]["items"] == []  # 不存在的 poi_id 被清洗
 
 
+def test_planner_filters_item_without_poi_id():
+    """缺 poi_id 的条目是编造项，必须被幻觉清洗丢弃。"""
+    fake = FakeProvider(json_responses={"行程": {
+        "days": [{"day": 1, "title": "x", "weather_note": "晴",
+                  "items": [{"time": "09:00", "name": "没有id的条目", "note": ""}]}],
+        "summary": "x", "warnings": [],
+    }})
+    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    assert out["itinerary"]["days"][0]["items"] == []
+
+
 def test_format_itinerary_shape():
     text = planner.format_itinerary(ITINERARY)
     assert "第 1 天" in text and "宽窄巷子" in text

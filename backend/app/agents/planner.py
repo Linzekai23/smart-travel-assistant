@@ -137,7 +137,7 @@ def planner_node(
         kept = []
         for item in day.get("items", []):
             pid = item.get("poi_id")
-            if pid and get_poi_fn(pid) is None:
+            if get_poi_fn(pid) is None:
                 continue  # 编造的 POI 直接丢弃
             kept.append(item)
         day["items"] = kept
