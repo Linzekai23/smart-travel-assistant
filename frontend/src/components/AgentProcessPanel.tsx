@@ -1,7 +1,4 @@
-export interface ProcessEvent {
-  type: string;
-  data: Record<string, unknown>;
-}
+import type { ProcessEvent } from "../api/sse";
 
 interface Props {
   events: ProcessEvent[];

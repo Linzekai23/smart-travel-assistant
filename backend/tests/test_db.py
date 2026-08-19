@@ -1,16 +1,13 @@
-import os
-
 import pytest
 
 from app import db
 
 
 @pytest.fixture()
-def tmp_db(tmp_path):
-    os.environ["TRAVEL_DB_PATH"] = str(tmp_path / "test.db")
+def tmp_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRAVEL_DB_PATH", str(tmp_path / "test.db"))
     db.init_db()
     yield
-    del os.environ["TRAVEL_DB_PATH"]
 
 
 def test_create_and_get_session(tmp_db):

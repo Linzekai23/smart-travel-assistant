@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import AgentProcessPanel, { type ProcessEvent } from "./components/AgentProcessPanel";
+import AgentProcessPanel from "./components/AgentProcessPanel";
 import ChatPanel from "./components/ChatPanel";
-import { connectSse } from "./api/sse";
+import { connectSse, type ProcessEvent } from "./api/sse";
 
 function App() {
   const [events, setEvents] = useState<ProcessEvent[]>([]);

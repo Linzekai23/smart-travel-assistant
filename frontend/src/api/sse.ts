@@ -7,12 +7,25 @@ export interface ProcessEvent {
 export function connectSse(
   onEvent: (event: ProcessEvent) => void
 ): () => void {
+  let connected = false;
   const source = new EventSource("/api/events");
   source.addEventListener("ping", (e) => {
-    onEvent({ type: "ping", data: JSON.parse((e as MessageEvent).data) });
+    try {
+      onEvent({ type: "ping", data: JSON.parse((e as MessageEvent).data) });
+    } catch {
+      onEvent({ type: "error", data: { reason: "parse" } });
+    }
   });
+  source.onopen = () => {
+    connected = true;
+  };
   source.onerror = () => {
-    onEvent({ type: "error", data: {} });
+    // 仅在连接状态发生转变（已连接 → 断开）时上报一次错误，
+    // EventSource 自动重试期间的连续 onerror 不再重复推送。
+    if (connected) {
+      connected = false;
+      onEvent({ type: "error", data: {} });
+    }
   };
   return () => source.close();
 }

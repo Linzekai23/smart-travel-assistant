@@ -1,4 +1,5 @@
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from app.state import TravelState
 
@@ -8,7 +9,7 @@ def stub_node(state: TravelState) -> dict:
     return {"phase": "ready"}
 
 
-def build_graph():
+def build_graph() -> CompiledStateGraph:
     g = StateGraph(TravelState)
     g.add_node("stub", stub_node)
     g.set_entry_point("stub")
