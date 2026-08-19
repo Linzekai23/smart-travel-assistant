@@ -50,7 +50,7 @@ d:\agent\
 │   ├── app/
 │   │   ├── agents/               # 6 个 agent 节点
 │   │   ├── graph.py              # LangGraph StateGraph（节点/边/并行）
-│   │   ├── state.py              # 共享状态模型（Pydantic）
+│   │   ├── state.py              # 共享状态模型（TypedDict）
 │   │   ├── tools/                # weather_api.py / poi_db.py
 │   │   ├── rag/                  # ingest.py / retriever.py / guides/
 │   │   ├── llm/                  # DeepSeek Provider 层
@@ -65,7 +65,7 @@ d:\agent\
 
 ### 关键设计点
 
-- **StateGraph + 共享状态**：节点通过 Pydantic 状态模型读写协作
+- **StateGraph + 共享状态**：节点通过 LangGraph 原生 TypedDict（`Annotated` reducer 字段）状态模型读写协作
 - **checkpointer（SQLite）**：会话历史持久化，支撑多轮对话
 - **并行 fan-out**：天气与 POI 查询并行执行
 - **SSE 事件**：`agent_status`（谁在干活）/ `message`（对话）/ `itinerary_update`（增量行程）
