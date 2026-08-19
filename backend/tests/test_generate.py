@@ -44,3 +44,14 @@ def test_validate_drops_bad_entries():
     bad_rating = dict(good, name="评分非法", rating=9.9)
     out = generate.validate_pois("北京", [good, bad_coord, bad_cat, bad_rating])
     assert len(out) == 1 and out[0]["name"] == "故宫"
+
+
+def test_validate_tags_null_tolerated():
+    """tags 为 null 不崩溃：条目保留且 tags 置空，tags 为列表的条目原样保留。"""
+    good = {"name": "故宫", "category": "attraction", "lat": 39.9, "lng": 116.4,
+            "rating": 4.8, "price_tier": 2, "description": "紫禁城。", "tags": ["历史"]}
+    bad = dict(good, name="tags空", tags=None)
+    out = generate.validate_pois("北京", [good, bad])
+    assert len(out) == 2
+    assert out[0]["name"] == "故宫" and out[0]["tags"] == ["历史"]
+    assert out[1]["name"] == "tags空" and out[1]["tags"] == []

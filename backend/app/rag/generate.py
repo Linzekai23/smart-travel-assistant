@@ -90,7 +90,7 @@ def validate_pois(city: str, pois: list[dict]) -> list[dict]:
         desc = str(p.get("description", "")).strip()
         if not desc:
             continue
-        tags = [str(t) for t in p.get("tags", []) if str(t).strip()][:4]
+        tags = [str(t) for t in (p.get("tags") or []) if str(t).strip()][:4]
         out.append({
             "poi_id": "", "city": city, "name": name, "category": category,
             "lat": lat, "lng": lng, "rating": rating, "price_tier": tier,
