@@ -38,9 +38,11 @@ class FakeProvider:
         return dict(resp)
 
     def chat(self, messages: list[dict], *, json_mode: bool = False) -> str:
-        self.calls.append(messages)
+        # json_mode 走 chat_json（内部记录一次 calls）；此处不再重复 append，
+        # 否则每次 json_mode 调用会产生 2 条 calls 记录
         if json_mode:
             return json.dumps(self.chat_json(messages), ensure_ascii=False)
+        self.calls.append(messages)
         resp = self._match(self.text_responses, messages)
         if resp is None:
             raise AssertionError(
