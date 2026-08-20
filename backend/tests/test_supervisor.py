@@ -1,0 +1,74 @@
+from app.agents import supervisor
+
+from conftest import FakeProvider
+
+ITINERARY = {
+    "days": [{"day": 1, "title": "广州地标", "weather_note": "晴 24°C",
+              "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": "夜景"}]}],
+    "summary": "首日珠江夜景线。", "warnings": [],
+}
+BUDGET = {
+    "items": [{"category": "住宿", "amount": 3200, "note": "中档酒店"}],
+    "total": 3200, "checked": True, "scaled": False,
+}
+WEATHER = [{"date": "2026-10-01", "t_max": 24.0, "t_min": 16.0,
+            "condition": "晴", "source": "open-meteo"}]
+
+
+def _state():
+    return {
+        "messages": [], "phase": "planning",
+        "profile": {"destination": "广州", "duration_days": 3, "budget_cny": 8000},
+        "itinerary": ITINERARY, "budget_plan": BUDGET, "weather": WEATHER,
+    }
+
+
+def test_supervisor_reply_contains_all_sections():
+    fake = FakeProvider(json_responses={"汇总JSON": {
+        "summary": "整体节奏合理，预算充裕。", "tips": ["周三起降温，带外套", "广州塔建议提前预约"],
+    }})
+    out = supervisor.supervisor_node(_state(), fake)  # type: ignore[arg-type]
+    assert out["phase"] == "answered"
+    assert out["supervisor_summary"]["summary"] == "整体节奏合理，预算充裕。"
+    reply = out["last_reply"]
+    assert "第 1 天" in reply          # 行程 markdown
+    assert "## 预算分配" in reply      # 预算表 markdown
+    assert "**总体建议**" in reply     # summary
+    assert "💡" in reply               # tips
+    assert "模拟数据" not in reply     # open-meteo 无脚注
+
+
+def test_supervisor_llm_failure_fallback():
+    """LLM 未配置响应（抛异常）→ 纯确定性拼装，行程与预算仍在。"""
+    out = supervisor.supervisor_node(_state(), FakeProvider())  # type: ignore[arg-type]
+    assert out["supervisor_summary"] == {"summary": "", "tips": []}
+    assert "第 1 天" in out["last_reply"]
+    assert "## 预算分配" in out["last_reply"]
+
+
+def test_supervisor_simulated_weather_footnote():
+    weather = [{"date": "2026-10-01", "t_max": 24.0, "t_min": 16.0,
+                "condition": "晴", "source": "simulated"}]
+    state = _state()
+    state["weather"] = weather
+    out = supervisor.supervisor_node(state, FakeProvider())  # type: ignore[arg-type]
+    assert "模拟数据" in out["last_reply"]
+
+
+def test_supervisor_drops_non_string_tips():
+    """tips 混入 None/数字 → 丢弃非字符串项，不渲染「💡 None」。"""
+    fake = FakeProvider(json_responses={"汇总JSON": {
+        "summary": "整体节奏合理。", "tips": ["带伞", None, 123],
+    }})
+    out = supervisor.supervisor_node(_state(), fake)  # type: ignore[arg-type]
+    assert out["supervisor_summary"]["tips"] == ["带伞"]
+    reply = out["last_reply"]
+    assert "💡 带伞" in reply
+    assert "💡 None" not in reply
+    assert "💡 123" not in reply
+
+
+def test_format_supervisor_reply_skips_empty_budget():
+    text = supervisor.format_supervisor_reply(ITINERARY, {"items": [], "total": None}, WEATHER, "不错", ["带伞"])
+    assert "## 预算分配" not in text
+    assert "**总体建议**：不错" in text

@@ -1,11 +1,14 @@
+from pathlib import Path
+
+from app.rag.ingest import load_corpus
 from app.rag.vector_store import VectorStore
 
 from conftest import FakeEmbedder
 
 
-def _poi(i: int, city: str = "北京", category: str = "attraction", name: str = "景点", rating: float = 4.5, tags=None) -> dict:
+def _poi(i: int, city: str = "北京", province: str = "北京", category: str = "attraction", name: str = "景点", rating: float = 4.5, tags=None) -> dict:
     return {
-        "poi_id": f"test-{i:03d}", "city": city, "name": name,
+        "poi_id": f"test-{i:03d}", "province": province, "city": city, "name": name,
         "category": category, "rating": rating, "price_tier": 2,
         "lat": 39.9, "lng": 116.4, "description": f"第{i}个测试点",
         "tags": tags or ["测试"],
@@ -47,12 +50,48 @@ def test_query_empty_text_sorts_by_rating(tmp_path):
 
 def test_get_all_and_poi_shape(tmp_path):
     store = VectorStore(str(tmp_path / "chroma"), FakeEmbedder())
-    store.upsert_pois([_poi(1, tags=["历史", "免费"]), _poi(2, city="成都")])
+    store.upsert_pois([_poi(1, tags=["历史", "免费"]), _poi(2, city="成都", province="四川")])
     all_pois = store.get_all()
     assert len(all_pois) == 2
     first = all_pois[0]
-    required = {"poi_id", "city", "name", "category", "rating",
+    required = {"poi_id", "province", "city", "name", "category", "rating",
                 "price_tier", "lat", "lng", "description", "tags"}
     assert set(first) == required
     assert first["tags"] == ["历史", "免费"]  # tags 恢复为 list
     assert store.get_all(city="成都")[0]["poi_id"] == "test-002"
+
+
+def test_poi_dict_contains_province(tmp_path):
+    store = VectorStore(str(tmp_path / "chroma"), FakeEmbedder())
+    store.upsert_pois([_poi(1, city="广州", province="广东")])
+    assert store.get_all()[0]["province"] == "广东"
+
+
+def test_query_by_province(tmp_path):
+    """province 过滤：广东查询只返回广东条目，不返回其他省。"""
+    fixture = Path(__file__).parent / "fixtures" / "sample_pois.jsonl"
+    store = VectorStore(str(tmp_path / "chroma"), FakeEmbedder())
+    store.upsert_pois(load_corpus(fixture))
+    hits = store.query("", province="广东", k=10)
+    assert len(hits) == 4
+    assert {p["province"] for p in hits} == {"广东"}
+    assert len(store.get_all(province="广东")) == 4
+
+
+def test_get_all_tolerates_legacy_row_without_province(tmp_path):
+    """旧 schema 持久化的行 metadata 缺 province 键：get_all 不崩溃且回退为空串。"""
+    store = VectorStore(str(tmp_path / "chroma"), FakeEmbedder())
+    store.upsert_pois([_poi(1)])
+    # 模拟 Task 2 之前旧 schema 写入的行：metadata 中没有 province 键
+    store._col.add(
+        ids=["legacy-001"],
+        documents=["旧 schema 写入的文档。"],
+        metadatas=[{
+            "poi_id": "legacy-001", "city": "北京", "name": "旧景点",
+            "category": "attraction", "rating": 4.0, "price_tier": 2,
+            "lat": 39.9, "lng": 116.4, "description": "旧数据",
+        }],
+    )
+    by_id = {p["poi_id"]: p for p in store.get_all()}
+    assert set(by_id) == {"test-001", "legacy-001"}
+    assert by_id["legacy-001"]["province"] == ""

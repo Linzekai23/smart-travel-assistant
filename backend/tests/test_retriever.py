@@ -1,4 +1,4 @@
-import math
+"""test_retriever.py —— 三级粒度检索"""
 from pathlib import Path
 
 import pytest
@@ -21,47 +21,67 @@ def store(tmp_path):
     retriever.set_store(None)
 
 
-def test_normalize_city_aliases():
-    assert retriever.normalize_city("北京") == "北京"
-    assert retriever.normalize_city("beijing") == "北京"
-    assert retriever.normalize_city("BeiJing") == "北京"
-    assert retriever.normalize_city("成都") == "成都"
-    assert retriever.normalize_city("chengdu") == "成都"
-    assert retriever.normalize_city("巴黎") is None
+def test_normalize_region_city():
+    assert retriever.normalize_region("广州") == ("广东", "广州")
+    assert retriever.normalize_region("guangzhou") == ("广东", "广州")
+    assert retriever.normalize_region("成都") == ("四川", "成都")
+    assert retriever.normalize_region("chengdu") == ("四川", "成都")
 
 
-def test_search_pois_by_category(store):
-    pois = retriever.search_pois("北京", category="restaurant")
-    assert {p["name"] for p in pois} == {"全聚德烤鸭（前门店）", "四季民福烤鸭店（故宫店）"}
+def test_normalize_region_province():
+    assert retriever.normalize_region("广东") == ("广东", None)
+    assert retriever.normalize_region("广东省") == ("广东", None)
+    assert retriever.normalize_region("粤") == ("广东", None)
+    assert retriever.normalize_region("guangdong") == ("广东", None)
+
+
+def test_normalize_region_unknown():
+    assert retriever.normalize_region("巴黎") == (None, None)
+    assert retriever.normalize_region("") == (None, None)
+
+
+def test_search_pois_in_kb_city(store):
+    pois = retriever.search_pois("广州")
+    assert {p["name"] for p in pois} == {"广州塔", "白云山"}
+
+
+def test_search_pois_by_province(store):
+    pois = retriever.search_pois("广东")
+    assert {p["name"] for p in pois} == {"广州塔", "白云山", "丹霞山", "世界之窗"}
+    assert len(pois) == 4
+
+
+def test_search_pois_out_of_kb_city_falls_back_to_province(store):
+    """搜库外城市（佛山）→ 所在省（广东）其他景点。"""
+    pois = retriever.search_pois("佛山")
+    assert {p["name"] for p in pois} == {"广州塔", "白云山", "丹霞山", "世界之窗"}
 
 
 def test_search_pois_semantic_query(store):
-    pois = retriever.search_pois("成都", query="火锅")
-    assert pois and pois[0]["name"].startswith("蜀大侠火锅")
+    pois = retriever.search_pois("成都", query="老街")
+    assert pois and pois[0]["name"] == "宽窄巷子"
 
 
-def test_search_pois_unknown_city(store):
+def test_search_pois_unknown_region(store):
     assert retriever.search_pois("巴黎") == []
 
 
 def test_get_poi(store):
     p = retriever.get_poi("beijing-001")
-    assert p and p["name"] == "故宫博物院"
+    assert p and p["name"] == "故宫博物院" and p["province"] == "北京"
     assert retriever.get_poi("nope") is None
 
 
-def test_search_nearby_radius_and_sort(store):
-    # 故宫(39.9163, 116.3972) 周边 3km：四季民福(39.9180, 116.4000) 近，全聚德(39.8997, 116.3967) 远
-    nearby = retriever.search_nearby(39.9163, 116.3972, category="restaurant", radius_km=3.0, k=5)
-    assert nearby[0]["name"] == "四季民福烤鸭店（故宫店）"
-    dist = retriever._haversine(39.9163, 116.3972, 39.9180, 116.4000)
-    assert 0 < dist < 3.0
+def test_search_nearby(store):
+    # 广州塔(23.1066, 113.3245) 周边 100km 内：广州塔自身（距离 0）+ 白云山；丹霞山(~250km) 被过滤
+    nearby = retriever.search_nearby(23.1066, 113.3245, category="attraction", radius_km=100.0, k=5)
+    assert {p["name"] for p in nearby} >= {"广州塔", "白云山"}
+    assert "丹霞山" not in {p["name"] for p in nearby}
 
 
 def test_get_store_without_set_raises(monkeypatch, tmp_path):
-    # 模型目录与 chroma 目录都指到不存在的位置：get_store 必须在加载模型
-    # 之前快速失败（模型不存在 → RuntimeError），而不是尝试联网下载挂起
-    monkeypatch.setenv("RAG_MODEL_DIR", str(tmp_path / "no-model"))
-    monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "no-chroma"))
+    """未 set_store 且模型目录不存在 → RuntimeError（不触发真实模型下载）。"""
+    monkeypatch.setattr(retriever, "_store", None)
+    monkeypatch.setattr("app.rag.download_model.default_model_dir", lambda: tmp_path / "no-model")
     with pytest.raises(RuntimeError, match="模型未就绪"):
         retriever.get_store()

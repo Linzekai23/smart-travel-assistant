@@ -2,8 +2,8 @@
 
 - 存储：PersistentClient（backend/data/chroma，TRAVEL_DB 同款 env 可覆盖）
 - 集合：poi_kb，cosine 空间，自定义 embedding_function（注入 Embedder/FakeEmbedder）
-- 文档文本：name + description + tags + category + city 聚合（检索语义的来源）
-- metadata：{poi_id, city, name, category, rating, price_tier, lat, lng,
+- 文档文本：name + description + tags + category + province + city 聚合（检索语义的来源）
+- metadata：{poi_id, province, city, name, category, rating, price_tier, lat, lng,
   description, tags_str}（tags 以逗号拼接，返回时还原为 list）
 """
 from __future__ import annotations
@@ -26,13 +26,14 @@ class _BgeEmbeddingFunction(EmbeddingFunction):
 
 def _doc_text(p: dict) -> str:
     tags = "、".join(p.get("tags", []))
-    return f"{p['name']}。{p.get('description', '')}。标签：{tags}。类别：{p['category']}。城市：{p['city']}"
+    return (f"{p['name']}。{p.get('description', '')}。标签：{tags}。"
+            f"类别：{p['category']}。省份：{p.get('province', '')}。城市：{p['city']}")
 
 
 def _meta(p: dict) -> dict:
     return {
-        "poi_id": p["poi_id"], "city": p["city"], "name": p["name"],
-        "category": p["category"], "rating": float(p["rating"]),
+        "poi_id": p["poi_id"], "province": p.get("province", ""), "city": p["city"],
+        "name": p["name"], "category": p["category"], "rating": float(p["rating"]),
         "price_tier": int(p["price_tier"]), "lat": float(p["lat"]),
         "lng": float(p["lng"]), "description": p.get("description", ""),
         "tags_str": ",".join(p.get("tags", [])),
@@ -43,6 +44,7 @@ def _poi_dict(meta: dict) -> dict:
     d = {k: meta[k] for k in
          ("poi_id", "city", "name", "category", "rating",
           "price_tier", "lat", "lng", "description")}
+    d["province"] = meta.get("province", "")
     d["tags"] = meta["tags_str"].split(",") if meta.get("tags_str") else []
     return d
 
@@ -72,11 +74,12 @@ class VectorStore:
         text: str,
         *,
         city: str | None = None,
+        province: str | None = None,
         category: str | None = None,
         k: int = 10,
     ) -> list[dict]:
         """向量检索；text 为空时退化为 metadata 过滤 + rating 降序。"""
-        where = self._where(city, category)
+        where = self._where(city, province, category)
         if text.strip():
             result = self._col.query(query_texts=[text], where=where, n_results=k)
         else:
@@ -86,19 +89,31 @@ class VectorStore:
             return [_poi_dict(m) for m in metas[:k]]
         return [_poi_dict(m) for m in (result.get("metadatas") or [[]])[0]]
 
-    def get_all(self, city: str | None = None, category: str | None = None) -> list[dict]:
-        fetched = self._col.get(where=self._where(city, category), limit=1000)
+    def get_all(
+        self,
+        city: str | None = None,
+        province: str | None = None,
+        category: str | None = None,
+    ) -> list[dict]:
+        fetched = self._col.get(where=self._where(city, province, category), limit=1000)
         return [_poi_dict(m) for m in (fetched.get("metadatas") or [])]
 
     def count(self) -> int:
         return self._col.count()
 
     @staticmethod
-    def _where(city: str | None, category: str | None) -> dict | None:
-        if city and category:
-            return {"$and": [{"city": city}, {"category": category}]}
+    def _where(
+        city: str | None = None,
+        province: str | None = None,
+        category: str | None = None,
+    ) -> dict | None:
+        conds = []
+        if province:
+            conds.append({"province": province})
         if city:
-            return {"city": city}
+            conds.append({"city": city})
         if category:
-            return {"category": category}
-        return None
+            conds.append({"category": category})
+        if not conds:
+            return None
+        return conds[0] if len(conds) == 1 else {"$and": conds}

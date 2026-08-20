@@ -11,14 +11,15 @@ import sys
 from pathlib import Path
 
 from app.rag.embeddings import Embedder
-from app.rag.generate import CITY_EN, default_corpus_path
+from app.rag.generate import default_corpus_path
+from app.rag.province_cities import PROVINCES, city_coord
 from app.rag.vector_store import VectorStore
 
-VALID_CATEGORIES = {"attraction", "restaurant", "hotel"}
+VALID_CATEGORIES = {"attraction"}
 
 
 def load_corpus(jsonl_path: str | Path) -> list[dict]:
-    """读取语料 JSONL：校验 + 生成 poi_id（{城市拼音}-{序号:03d}）。"""
+    """读取语料 JSONL：校验（省份/城市/类别/坐标 ±2°）+ 生成 poi_id（{城市拼音}-{序号:03d}）。"""
     pois: list[dict] = []
     with Path(jsonl_path).open(encoding="utf-8") as f:
         for line in f:
@@ -30,17 +31,31 @@ def load_corpus(jsonl_path: str | Path) -> list[dict]:
             except json.JSONDecodeError:
                 continue
             if not isinstance(p, dict):
-                continue  # 非对象 JSON 行（数组/字符串等）跳过
-            city = p.get("city")
-            if not city or city not in CITY_EN or p.get("category") not in VALID_CATEGORIES:
                 continue
+            province = p.get("province")
+            city = p.get("city")
+            if (
+                province not in PROVINCES
+                or city not in PROVINCES[province]["poi_cities"]
+                or p.get("category") not in VALID_CATEGORIES
+            ):
+                continue
+            try:
+                lat, lng = float(p["lat"]), float(p["lng"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            clat, clng = city_coord(province, city)
+            if abs(lat - clat) > 2.0 or abs(lng - clng) > 2.0:
+                continue  # 坐标越界丢弃（语料可能被手工编辑，二次校验）
+            p["province"] = province
             p["city"] = city
+            p["category"] = "attraction"
             pois.append(p)
     counts: dict[str, int] = {}
     for p in pois:
         key = p["city"]
         counts[key] = counts.get(key, 0) + 1
-        p["poi_id"] = f"{CITY_EN[key]}-{counts[key]:03d}"
+        p["poi_id"] = f"{PROVINCES[p['province']]['poi_cities'][key][0]}-{counts[key]:03d}"
     return pois
 
 
