@@ -2,9 +2,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db
+from app.graph import build_graph as _real_build_graph
 from app.main import app
 
 from conftest import FakeProvider
+from test_researcher import _kwargs as _researcher_kwargs
 
 
 class ReplanFakeProvider(FakeProvider):
@@ -84,6 +86,12 @@ def client(tmp_path, monkeypatch):
     def _fake_provider():
         return fake
     monkeypatch.setattr("app.main.get_provider", _fake_provider)
+    # researcher 依赖注入：chat.py 的 build_graph 注入 fake weather/search/normalize，
+    # 测试全 mock 无网络（真实实现依赖 Open-Meteo 网络与 chroma 数据，违反全 mock 约束）
+    def _fake_graph(provider, *, checkpointer=None):
+        return _real_build_graph(provider, checkpointer=checkpointer, **_researcher_kwargs())
+
+    monkeypatch.setattr("app.api.chat.build_graph", _fake_graph)
     with TestClient(app) as c:
         yield c
     app.state.graph = None
