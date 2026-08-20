@@ -135,6 +135,44 @@ def test_build_graph_accepts_checkpointer():
     # 第二次 analyst 提示词应含已有画像（画像跨 invoke 延续）。
     # 注意：第二次 invoke 会走完 analyst→…→supervisor 全流程，最后一次 LLM 调用是
     # supervisor；故定位第二次的 analyst 调用（最新一条含"已有画像"标记的调用）。
-    analyst_prompt = next(c[-1]["content"] for c in reversed(fake.calls) if "已有画像" in c[-1]["content"])
+    analyst_prompt = next((c[-1]["content"] for c in reversed(fake.calls) if "已有画像" in c[-1]["content"]), None)
+    assert analyst_prompt is not None, "未找到含「已有画像」标记的 analyst 调用"
     assert "已有画像" in analyst_prompt
     assert "广州" in analyst_prompt
+
+
+def test_candidates_last_write_wins_across_rounds():
+    """checkpointer 跨 invoke：第 1 轮广州（有候选）→ 第 2 轮改河北（normalize 成功、
+    search 返回 []）→ candidates 必须为 []（last-write-wins，旧广州候选不得经
+    operator.add 残留），planner 走空候选降级分支、不调用行程 LLM。"""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    fake = _fake()
+    kwargs = _researcher_kwargs()  # search_pois_fn 仅"广州"返回候选 → "河北"返回 []
+    _normalize = kwargs["normalize_region_fn"]
+
+    def normalize(name):
+        if "河北" in name:
+            return ("河北", None)
+        return _normalize(name)
+
+    kwargs["normalize_region_fn"] = normalize
+    graph = build_graph(fake, checkpointer=MemorySaver(), **kwargs)
+    cfg = {"configurable": {"thread_id": "t1"}}
+    r1 = graph.invoke({
+        "messages": [{"role": "user", "content": "10月去广州玩3天，预算8000"}],
+        "phase": "",
+    }, config=cfg)
+    assert r1["candidates"]  # 第 1 轮有广州候选
+
+    # 第 2 轮：analyst 返回 destination=河北（覆盖 fake 的"已有画像"响应）
+    fake.json_responses["已有画像"] = {
+        "destination": "河北", "duration_days": 3, "start_date": None,
+        "budget_cny": 8000, "travelers": 2, "preferences": [], "missing": [],
+    }
+    r2 = graph.invoke({
+        "messages": [{"role": "user", "content": "改成河北"}],
+        "phase": "",
+    }, config=cfg)
+    assert r2["candidates"] == []  # 旧广州候选不得残留
+    assert "该区域暂未检索到景点数据" in r2["last_reply"]

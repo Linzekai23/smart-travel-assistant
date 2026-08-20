@@ -43,7 +43,7 @@ async def chat(req: ChatRequest, request: Request):
 
     sid = req.session_id or db.create_session()
     if db.get_session(sid) is None:
-        # 非法/未知 session_id：按新会话处理（历史仍在则继续累积到该 id）
+        # 非法/未知 session_id：换新会话处理（checkpoint 无记录，按新 thread 开始）
         sid = db.create_session()
     db.add_message(sid, "user", req.message)
 

@@ -30,7 +30,11 @@ function App() {
     fetch(`/api/chat/history?session_id=${encodeURIComponent(sid)}`)
       .then((resp) => (resp.ok ? resp.json() : null))
       .then((data) => {
-        if (data?.messages?.length) setMessages(data.messages);
+        // 挂载竞态防护：history 返回前用户已极速首发消息（本地已入 state），
+        // 此时只补历史、不整组覆盖（否则首条用户消息被历史数据冲掉）
+        if (data?.messages?.length) {
+          setMessages((prev) => (prev.length ? prev : data.messages));
+        }
       })
       .catch(() => {});
   }, []);

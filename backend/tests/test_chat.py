@@ -161,3 +161,27 @@ def test_chat_unknown_session_creates_new(client):
     resp = client.post("/api/chat", json={"session_id": "deadbeef", "message": "10月去广州玩3天预算8000"})
     assert resp.status_code == 200
     assert resp.json()["session_id"] != "deadbeef"
+
+
+def test_history_returns_messages_in_order(client):
+    """GET /api/chat/history：两次 chat 后返回 4 条消息，role 按 user/assistant 交替且升序。"""
+    r1 = client.post("/api/chat", json={"message": "10月去广州玩3天预算8000"}).json()
+    sid = r1["session_id"]
+    r2_resp = client.post("/api/chat", json={"session_id": sid, "message": "第二天换成博物馆"})
+    assert r2_resp.status_code == 200
+    r2 = r2_resp.json()
+    resp = client.get(f"/api/chat/history?session_id={sid}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == sid
+    msgs = body["messages"]
+    assert len(msgs) == 4
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"]
+    # 升序：首条 = 第 1 轮 user 消息，末条 = 第 2 轮 assistant 回复
+    assert msgs[0]["content"] == "10月去广州玩3天预算8000"
+    assert msgs[-1]["content"] == r2["reply"]
+
+
+def test_history_unknown_session_returns_404(client):
+    resp = client.get("/api/chat/history?session_id=deadbeef")
+    assert resp.status_code == 404
