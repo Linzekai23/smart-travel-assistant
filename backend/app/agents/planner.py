@@ -12,7 +12,7 @@ from collections.abc import Callable
 from app import events
 from app.llm.deepseek import DeepSeekProvider
 from app.rag.retriever import get_poi as _default_get_poi
-from app.rag.retriever import normalize_city as _default_normalize_city
+from app.rag.retriever import normalize_region as _default_normalize_city
 from app.rag.retriever import search_nearby as _default_search_nearby
 from app.rag.retriever import search_pois as _default_search_pois
 from app.tools.weather_api import get_weather as _default_weather
@@ -104,7 +104,7 @@ def planner_node(
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "start"}})
     profile: dict = state.get("profile", {})
     destination = profile.get("destination", "")
-    city = normalize_city_fn(destination) if destination else None
+    _province, city = normalize_city_fn(destination) if destination else (None, None)
     if city is None:
         events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
         return {
