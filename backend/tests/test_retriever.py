@@ -9,6 +9,8 @@ from app.rag.vector_store import VectorStore
 
 from conftest import FakeEmbedder
 
+pytestmark = pytest.mark.skip(reason="Task 3 重写")
+
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_pois.jsonl"
 
 

@@ -1,7 +1,7 @@
-"""POI 语料生成：DeepSeek 按城市模板批量生成（一次一城，JSON 模式）。
+"""POI 语料生成：DeepSeek 按省份模板批量生成（一次一省，JSON 模式）。
 
 产物是 backend/data/poi_corpus.jsonl，数据为 **AI 生成示例数据，
-坐标仅供参考**（README 与前端展示均注明）。
+坐标仅供参考**（README 与前端展示均注明）。只生成景点（attraction）。
 """
 from __future__ import annotations
 
@@ -11,78 +11,82 @@ import sys
 from pathlib import Path
 
 from app.llm.deepseek import DeepSeekProvider
+from app.rag.province_cities import PROVINCES, city_coord
 
-CITIES = [
-    "北京", "上海", "成都", "西安", "杭州", "广州", "深圳", "南京", "苏州",
-    "重庆", "厦门", "青岛", "大连", "长沙", "武汉", "昆明", "大理", "丽江",
-    "三亚", "洛阳",
+# 34 省遍历顺序（语料生成与断言基准）
+PROVINCE_ORDER = [
+    "北京", "上海", "天津", "重庆",
+    "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
+    "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东",
+    "广西", "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆",
+    "台湾", "香港", "澳门",
 ]
 
-CITY_EN = {
-    "北京": "beijing", "上海": "shanghai", "成都": "chengdu", "西安": "xian",
-    "杭州": "hangzhou", "广州": "guangzhou", "深圳": "shenzhen", "南京": "nanjing",
-    "苏州": "suzhou", "重庆": "chongqing", "厦门": "xiamen", "青岛": "qingdao",
-    "大连": "dalian", "长沙": "changsha", "武汉": "wuhan", "昆明": "kunming",
-    "大理": "dali", "丽江": "lijiang", "三亚": "sanya", "洛阳": "luoyang",
+# 城市 → 拼音（全部 poi_cities 城市，动态生成；poi_id 与别名表共用）
+CITY_EN: dict[str, str] = {
+    city: pinyin
+    for d in PROVINCES.values()
+    for city, (pinyin, _coord) in d["poi_cities"].items()
 }
 
-# 城市中心坐标（用于生成时约束坐标范围与 ingest 校验）
+# 城市 → 中心坐标（全部 poi_cities 城市，动态生成；planner.py 天气坐标查询
+# 仍依赖此表，待 planner 迁移 city_coord() 后移除）
 CITY_COORDS: dict[str, tuple[float, float]] = {
-    "北京": (39.9042, 116.4074), "上海": (31.2304, 121.4737), "成都": (30.5728, 104.0668),
-    "西安": (34.3416, 108.9398), "杭州": (30.2741, 120.1551), "广州": (23.1291, 113.2644),
-    "深圳": (22.5431, 114.0579), "南京": (32.0603, 118.7969), "苏州": (31.2989, 120.5853),
-    "重庆": (29.5630, 106.5516), "厦门": (24.4798, 118.0894), "青岛": (36.0671, 120.3826),
-    "大连": (38.9140, 121.6147), "长沙": (28.2282, 112.9388), "武汉": (30.5928, 114.3055),
-    "昆明": (24.8801, 102.8329), "大理": (25.6065, 100.2676), "丽江": (26.8721, 100.2299),
-    "三亚": (18.2528, 109.5119), "洛阳": (34.6197, 112.4540),
+    city: coord
+    for d in PROVINCES.values()
+    for city, (_pinyin, coord) in d["poi_cities"].items()
 }
 
-VALID_CATEGORIES = {"attraction", "restaurant", "hotel"}
 VALID_TIERS = {1, 2, 3, 4}
 
-GENERATE_SYSTEM_PROMPT = """你是中国旅游 POI 数据生成器。为指定城市生成景点/酒店/餐厅条目（AI 生成示例数据，坐标仅供参考，但要落在该城市市中心周边合理范围）。
+GENERATE_SYSTEM_PROMPT = """你是中国旅游 POI 数据生成器。为指定省份生成著名旅游景点条目（AI 生成示例数据，坐标仅供参考，要落在对应城市市中心周边合理范围）。
 只输出 JSON 对象（不要 markdown、不要其他文字），schema：
-{"city": "城市名", "pois": [
-  {"name": "中文名", "category": "attraction|restaurant|hotel",
+{"province": "省份名", "pois": [
+  {"name": "中文名", "city": "景点所在城市（必须是给定城市清单中的城市）",
    "lat": 纬度, "lng": 经度, "rating": 3.5到5.0一位小数,
-   "price_tier": 1到4整数, "description": "50字以内，真实、信息密度高",
-   "tags": ["2-4个标签，如 历史/夜景/亲子/排队/免费"]}
+   "price_tier": 1到4整数（门票价位）, "description": "50字以内，真实、信息密度高",
+   "tags": ["2-4个标签，如 历史/夜景/亲子/自然/世界遗产"]}
 ]}
-数量要求：景点 8-10 个、餐厅 5-6 家（含本地特色美食）、酒店 3-4 家（覆盖经济/舒适/高档价位）。"""
+数量要求：共 4-6 个景点，分布在给定城市清单中（每城 1-3 个）。只生成景点，不要餐厅/酒店。"""
 
 
-def generate_city(provider: DeepSeekProvider, city: str) -> list[dict]:
-    """调用一次 DeepSeek 生成一城 POI，返回校验后的条目（含 city 字段）。"""
-    lat, lng = CITY_COORDS[city]
+def generate_province(provider: DeepSeekProvider, province: str) -> list[dict]:
+    """调用一次 DeepSeek 生成一省景点，返回校验后的条目（含 province/city 字段）。"""
+    poi_cities = PROVINCES[province]["poi_cities"]
+    cities_text = "、".join(poi_cities)
     messages = [
         {"role": "system", "content": GENERATE_SYSTEM_PROMPT},
         {"role": "user", "content": (
-            f"请为「{city}」生成 POI 数据。市中心坐标约 ({lat}, {lng})，"
-            "所有条目坐标必须在市中心 ±2 度范围内。只输出 JSON。"
+            f"请为「{province}」生成著名景点数据。可选城市：{cities_text}（每城 1-3 个）。"
+            f"城市中心坐标：{json.dumps({c: c2 for c, (_p, c2) in poi_cities.items()}, ensure_ascii=False)}。"
+            "所有条目坐标必须在对应城市中心 ±2 度范围内。只输出 JSON。"
         )},
     ]
     raw = provider.chat_json(messages)
     pois = (raw.get("pois") or []) if isinstance(raw, dict) else []
-    return validate_pois(city, pois)
+    return validate_pois(province, pois)
 
 
-def validate_pois(city: str, pois: list[dict]) -> list[dict]:
-    """字段/类别/评分/价位/坐标校验；非法条目丢弃。"""
-    clat, clng = CITY_COORDS[city]
+def validate_pois(province: str, pois: list[dict]) -> list[dict]:
+    """字段/城市/类别/评分/价位/坐标校验；非法条目丢弃。"""
+    poi_cities = PROVINCES[province]["poi_cities"]
     out = []
     for p in pois:
         if not isinstance(p, dict):
             continue
         name = str(p.get("name", "")).strip()
-        category = p.get("category")
-        if not name or category not in VALID_CATEGORIES:
-            continue
+        city = str(p.get("city", "")).strip()
+        if not name or city not in poi_cities:
+            continue  # 城市必须在本省 poi_cities 内
+        if p.get("category", "attraction") != "attraction":
+            continue  # 语料只存景点
         try:
             lat, lng = float(p["lat"]), float(p["lng"])
             rating = float(p["rating"])
             tier = int(p["price_tier"])
         except (KeyError, TypeError, ValueError):
             continue
+        clat, clng = city_coord(province, city)
         if not (3.5 <= rating <= 5.0 and tier in VALID_TIERS):
             continue
         if abs(lat - clat) > 2.0 or abs(lng - clng) > 2.0:
@@ -92,12 +96,12 @@ def validate_pois(city: str, pois: list[dict]) -> list[dict]:
             continue
         tags_raw = p.get("tags") or []
         if isinstance(tags_raw, str):
-            tags_raw = [tags_raw]  # 标签为纯字符串时按单元素列表处理，避免逐字拆分
+            tags_raw = [tags_raw]
         tags = [str(t).strip() for t in tags_raw if str(t).strip()][:4]
         out.append({
-            "poi_id": "", "city": city, "name": name, "category": category,
-            "lat": lat, "lng": lng, "rating": rating, "price_tier": tier,
-            "description": desc, "tags": tags,
+            "poi_id": "", "province": province, "city": city, "name": name,
+            "category": "attraction", "lat": lat, "lng": lng, "rating": rating,
+            "price_tier": tier, "description": desc, "tags": tags,
         })
     return out
 
@@ -116,12 +120,12 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     total = 0
     with out_path.open("w", encoding="utf-8") as f:
-        for city in CITIES:
-            pois = generate_city(provider, city)
+        for province in PROVINCE_ORDER:
+            pois = generate_province(provider, province)
             for p in pois:
                 f.write(json.dumps(p, ensure_ascii=False) + "\n")
             total += len(pois)
-            print(f"{city}: {len(pois)} 条")
+            print(f"{province}: {len(pois)} 条")
     print(f"完成：{total} 条 → {out_path}")
     return 0
 
