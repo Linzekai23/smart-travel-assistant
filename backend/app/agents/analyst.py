@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app import events
 from app.llm.deepseek import DeepSeekProvider
 
 ANALYST_SYSTEM_PROMPT = """你是智能旅行助手的"需求分析师"。你的任务是从用户的出行需求中抽取结构化信息。
@@ -49,6 +50,7 @@ def build_question(missing: list[str]) -> str:
 
 def analyst_node(state: dict, llm: DeepSeekProvider) -> dict:
     """抽取需求 → 缺失核心字段则追问（phase=asking）→ 否则合入画像（phase=planning）。"""
+    events.publish({"type": "agent_status", "data": {"agent": "analyst", "status": "start"}})
     profile: dict[str, Any] = dict(state.get("profile", {}))
     user_msg = _last_user_message(state)
     history = state.get("messages", [])
@@ -64,9 +66,11 @@ def analyst_node(state: dict, llm: DeepSeekProvider) -> dict:
 
     missing = [f for f in parsed.get("missing", []) if f in CORE_FIELDS]
     if missing:
+        events.publish({"type": "agent_status", "data": {"agent": "analyst", "status": "done"}})
         return {
             "phase": "asking",
             "messages": [{"role": "assistant", "content": build_question(missing)}],
             "profile": profile,
         }
+    events.publish({"type": "agent_status", "data": {"agent": "analyst", "status": "done"}})
     return {"phase": "planning", "profile": profile}

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
+from app import events
 from app.llm.deepseek import DeepSeekProvider
 from app.rag.retriever import get_poi as _default_get_poi
 from app.rag.retriever import normalize_city as _default_normalize_city
@@ -100,10 +101,12 @@ def planner_node(
     get_poi_fn: Callable = _default_get_poi,
     normalize_city_fn: Callable = _default_normalize_city,
 ) -> dict:
+    events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "start"}})
     profile: dict = state.get("profile", {})
     destination = profile.get("destination", "")
     city = normalize_city_fn(destination) if destination else None
     if city is None:
+        events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
         return {
             "phase": "answered",
             "itinerary": {},
@@ -146,4 +149,5 @@ def planner_node(
     reply = format_itinerary(itinerary)
     if source == "simulated":
         reply += "\n\n_（天气数据暂不可用，已用模拟数据，仅供参考）_"
+    events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
     return {"phase": "answered", "itinerary": itinerary, "last_reply": reply}

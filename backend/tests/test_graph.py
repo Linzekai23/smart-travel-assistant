@@ -1,3 +1,4 @@
+from app import events
 from app.graph import build_graph
 
 from conftest import FakeProvider
@@ -47,3 +48,25 @@ def test_incomplete_request_ends_at_analyst():
     })
     assert result["phase"] == "asking"
     assert "想去哪个城市" in result["messages"][-1]["content"]
+
+
+def test_nodes_publish_agent_status():
+    q = events.subscribe()
+    try:
+        graph = build_graph(_fake(), **_kwargs())  # type: ignore[arg-type]
+        graph.invoke({
+            "messages": [{"role": "user", "content": "10月去成都玩3天，预算8000"}],
+            "phase": "",
+        })
+        seen = []
+        while not q.empty():
+            ev = q.get_nowait()
+            if ev["type"] == "agent_status":
+                seen.append((ev["data"]["agent"], ev["data"]["status"]))
+    finally:
+        events.unsubscribe(q)
+    by_agent = {"analyst": [], "planner": []}
+    for agent, status in seen:
+        by_agent[agent].append(status)
+    assert "start" in by_agent["analyst"] and "done" in by_agent["analyst"]
+    assert "start" in by_agent["planner"] and "done" in by_agent["planner"]
