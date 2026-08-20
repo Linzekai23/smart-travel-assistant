@@ -66,7 +66,7 @@ cd backend && .venv/Scripts/python -m pytest -v   # 全部用 mock（FakeProvide
 | 阶段 | 状态 |
 |---|---|
 | M1 骨架（FastAPI + SSE + SQLite + 图 + 前端骨架） | ✅ 完成 |
-| M2 最小闭环（DeepSeek + **RAG POI 知识库** + Analyst/Planner + 天气） | 🚧 进行中 |
+| M2 最小闭环（DeepSeek + **RAG POI 知识库** + Analyst/Planner + 天气） | ✅ 完成 |
 | M3 完整协作（Supervisor 路由 + Researcher/Budget + 并行） | ⬜ |
 | M4 对话能力（checkpointer + 修改重排） | ⬜ |
 | M5 地图与交付（Leaflet + 可视化 + 文档 + 演示脚本） | ⬜ |
