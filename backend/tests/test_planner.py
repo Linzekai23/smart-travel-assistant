@@ -71,7 +71,21 @@ def test_planner_unknown_region_returns_hint():
     assert out["phase"] == "answered"
     assert "巴黎" in out["last_reply"]
     assert "暂不支持" in out["last_reply"]
+    assert "可尝试输入所在省份名" in out["last_reply"]  # 提示改用省份名
     assert fake.calls == []  # 未知目的地不调用 LLM
+
+
+def test_planner_empty_candidates_degrades_without_llm():
+    """KB 为空/未入库：region_resolved=True 但 candidates=[] → 降级提示，不调用 LLM。"""
+    fake = _fake()
+    state = _state()
+    state["candidates"] = []
+    out = planner.planner_node(state, fake)  # type: ignore[arg-type]
+    assert out["phase"] == "answered"
+    assert "该区域暂未检索到景点数据" in out["last_reply"]
+    assert "python -m app.rag.generate" in out["last_reply"]
+    assert "python -m app.rag.ingest" in out["last_reply"]
+    assert fake.calls == []  # 空候选不调用 LLM（防编造景点渲染成真实行程）
 
 
 def test_planner_filters_hallucinated_poi():

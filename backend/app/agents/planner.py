@@ -72,7 +72,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
     """消费 state（candidates/budget_plan/weather）→ LLM 行程 JSON → 幻觉清洗 → 回复。
 
     region_resolved=False（Researcher 归一化失败）时直接输出降级提示，不调用 LLM
-    （图装配中该分支直接 END，不经 supervisor）。
+    （图装配中该分支直接 END，不经 supervisor）；region_resolved=True 但 candidates
+    为空（KB 空/未入库）同样降级输出提示，不调用 LLM，防编造景点渲染成真实行程。
     """
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "start"}})
     profile: dict = state.get("profile", {})
@@ -85,10 +86,23 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             "itinerary": {},
             "last_reply": (
                 f"目前暂不支持「{destination}」的行程规划，当前支持全国 34 个省级行政区的著名景点。"
+                "可尝试输入所在省份名，如「广东」。"
             ),
         }
 
     candidates: list[dict] = state.get("candidates", [])
+    if region_resolved is True and not candidates:
+        # KB 为空/未入库：researcher 已归一化区域但无候选 → 降级提示，不调用 LLM
+        # （否则 LLM 会编造景点，幻觉清洗保留无 poi_id 条目，渲染成貌似真实的行程）
+        events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
+        return {
+            "phase": "answered",
+            "itinerary": {},
+            "last_reply": (
+                "该区域暂未检索到景点数据，请先运行语料生成与入库"
+                "（python -m app.rag.generate / python -m app.rag.ingest）。"
+            ),
+        }
     budget_plan: dict = state.get("budget_plan", {})
     weather: list[dict] = state.get("weather", [])
 

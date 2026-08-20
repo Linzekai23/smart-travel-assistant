@@ -55,6 +55,19 @@ def test_supervisor_simulated_weather_footnote():
     assert "模拟数据" in out["last_reply"]
 
 
+def test_supervisor_drops_non_string_tips():
+    """tips 混入 None/数字 → 丢弃非字符串项，不渲染「💡 None」。"""
+    fake = FakeProvider(json_responses={"汇总JSON": {
+        "summary": "整体节奏合理。", "tips": ["带伞", None, 123],
+    }})
+    out = supervisor.supervisor_node(_state(), fake)  # type: ignore[arg-type]
+    assert out["supervisor_summary"]["tips"] == ["带伞"]
+    reply = out["last_reply"]
+    assert "💡 带伞" in reply
+    assert "💡 None" not in reply
+    assert "💡 123" not in reply
+
+
 def test_format_supervisor_reply_skips_empty_budget():
     text = supervisor.format_supervisor_reply(ITINERARY, {"items": [], "total": None}, WEATHER, "不错", ["带伞"])
     assert "## 预算分配" not in text

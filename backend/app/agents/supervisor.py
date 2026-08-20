@@ -59,7 +59,12 @@ def supervisor_node(state: dict, llm: DeepSeekProvider) -> dict:
         ]
         parsed = llm.chat_json(messages)
         summary = str(parsed.get("summary") or "")[:200].strip()
-        tips = [str(t).strip()[:100] for t in (parsed.get("tips") or []) if str(t).strip()][:5]
+        # 非字符串元素（如 LLM 返回的 null/数字）直接丢弃，防渲染出「💡 None」
+        tips = [
+            str(t).strip()[:100]
+            for t in (parsed.get("tips") or [])
+            if isinstance(t, str) and t.strip()
+        ][:5]
     except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
         summary, tips = "", []  # LLM 失败 → 确定性兜底拼装
 
