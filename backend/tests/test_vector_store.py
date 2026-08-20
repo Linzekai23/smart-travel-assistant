@@ -76,3 +76,22 @@ def test_query_by_province(tmp_path):
     assert len(hits) == 4
     assert {p["province"] for p in hits} == {"广东"}
     assert len(store.get_all(province="广东")) == 4
+
+
+def test_get_all_tolerates_legacy_row_without_province(tmp_path):
+    """旧 schema 持久化的行 metadata 缺 province 键：get_all 不崩溃且回退为空串。"""
+    store = VectorStore(str(tmp_path / "chroma"), FakeEmbedder())
+    store.upsert_pois([_poi(1)])
+    # 模拟 Task 2 之前旧 schema 写入的行：metadata 中没有 province 键
+    store._col.add(
+        ids=["legacy-001"],
+        documents=["旧 schema 写入的文档。"],
+        metadatas=[{
+            "poi_id": "legacy-001", "city": "北京", "name": "旧景点",
+            "category": "attraction", "rating": 4.0, "price_tier": 2,
+            "lat": 39.9, "lng": 116.4, "description": "旧数据",
+        }],
+    )
+    by_id = {p["poi_id"]: p for p in store.get_all()}
+    assert set(by_id) == {"test-001", "legacy-001"}
+    assert by_id["legacy-001"]["province"] == ""

@@ -42,8 +42,9 @@ def _meta(p: dict) -> dict:
 
 def _poi_dict(meta: dict) -> dict:
     d = {k: meta[k] for k in
-         ("poi_id", "province", "city", "name", "category", "rating",
+         ("poi_id", "city", "name", "category", "rating",
           "price_tier", "lat", "lng", "description")}
+    d["province"] = meta.get("province", "")
     d["tags"] = meta["tags_str"].split(",") if meta.get("tags_str") else []
     return d
 
