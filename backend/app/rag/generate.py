@@ -62,7 +62,7 @@ def generate_city(provider: DeepSeekProvider, city: str) -> list[dict]:
         )},
     ]
     raw = provider.chat_json(messages)
-    pois = raw.get("pois", []) if isinstance(raw, dict) else []
+    pois = (raw.get("pois") or []) if isinstance(raw, dict) else []
     return validate_pois(city, pois)
 
 
@@ -87,10 +87,13 @@ def validate_pois(city: str, pois: list[dict]) -> list[dict]:
             continue
         if abs(lat - clat) > 2.0 or abs(lng - clng) > 2.0:
             continue  # 坐标越界丢弃
-        desc = str(p.get("description", "")).strip()
+        desc = str(p.get("description") or "").strip()
         if not desc:
             continue
-        tags = [str(t) for t in (p.get("tags") or []) if str(t).strip()][:4]
+        tags_raw = p.get("tags") or []
+        if isinstance(tags_raw, str):
+            tags_raw = [tags_raw]  # 标签为纯字符串时按单元素列表处理，避免逐字拆分
+        tags = [str(t).strip() for t in tags_raw if str(t).strip()][:4]
         out.append({
             "poi_id": "", "city": city, "name": name, "category": category,
             "lat": lat, "lng": lng, "rating": rating, "price_tier": tier,

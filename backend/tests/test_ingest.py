@@ -26,3 +26,13 @@ def test_run_ingest_upserts(tmp_path):
     n = run_ingest(str(p), store)
     assert n == 2
     assert store.count() == 2
+
+
+def test_load_corpus_skips_non_dict_lines(tmp_path):
+    """非对象 JSON 行（数组/字符串）不崩溃，直接跳过（T4-F4）。"""
+    p = tmp_path / "corpus.jsonl"
+    p.write_text("\n".join([CORPUS_LINES[0], "[1, 2, 3]", '"just a string"']), encoding="utf-8")
+    pois = load_corpus(str(p))
+    assert len(pois) == 1
+    assert pois[0]["name"] == "宽窄巷子"
+    assert pois[0]["poi_id"] == "chengdu-001"

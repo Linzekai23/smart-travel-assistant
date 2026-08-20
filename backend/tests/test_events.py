@@ -30,3 +30,24 @@ def test_event_stream_frames():
         assert frame.endswith("\n\n")
 
     asyncio.run(scenario())
+
+
+def test_publish_from_worker_thread():
+    """publish 可从 worker 线程调用：经 call_soon_threadsafe 投递到订阅者事件循环。"""
+    import threading
+
+    async def scenario():
+        q = events.subscribe()
+        try:
+            def worker():
+                events.publish({"type": "agent_status", "data": {"agent": "x", "status": "start"}})
+
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            payload = await asyncio.wait_for(q.get(), timeout=1)
+            assert payload["type"] == "agent_status"
+        finally:
+            events.unsubscribe(q)
+
+    asyncio.run(scenario())

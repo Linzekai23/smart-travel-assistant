@@ -28,7 +28,10 @@ export default function ChatPanel({ onSend, disabled }: Props) {
           placeholder="输入出行需求…"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.key !== "Enter") return;
+            submit();
+          }}
         />
         <button
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"

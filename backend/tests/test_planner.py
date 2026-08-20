@@ -141,3 +141,13 @@ def test_format_itinerary_shape():
     assert "第 1 天" in text and "宽窄巷子" in text
     assert "09:00" in text and "早到避开人流" in text
     assert "## " in text
+
+
+def test_planner_days_null_tolerated():
+    """LLM 返回 days: null 时幻觉清洗与格式化均不得崩溃（T8-F4）。"""
+    fake = FakeProvider(json_responses={"行程": {
+        "days": None, "summary": "无行程。", "warnings": [],
+    }})
+    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    assert out["phase"] == "answered"
+    assert "行程总结" in out["last_reply"]

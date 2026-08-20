@@ -74,7 +74,7 @@ def build_candidate_context(
 def format_itinerary(itinerary: dict) -> str:
     """把结构化行程转成中文 markdown 文本（确定性，不依赖 LLM）。"""
     lines: list[str] = []
-    for day in itinerary.get("days", []):
+    for day in itinerary.get("days") or []:
         lines.append(f"## 第 {day['day']} 天：{day.get('title', '')}")
         note = day.get("weather_note")
         if note:
@@ -136,7 +136,7 @@ def planner_node(
     itinerary = llm.chat_json(llm_messages)
 
     # 清洗：过滤引用不存在的 poi_id 的条目（LLM 幻觉防护）
-    for day in itinerary.get("days", []):
+    for day in itinerary.get("days") or []:
         kept = []
         for item in day.get("items", []):
             pid = item.get("poi_id")

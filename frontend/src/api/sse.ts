@@ -42,6 +42,7 @@ export function connectSse(
   onEvent: (event: ProcessEvent) => void
 ): () => void {
   let connected = false;
+  let reportedDown = false;
   const source = new EventSource("/api/events");
   source.addEventListener("ping", (e) =>
     handle<PingEvent["data"]>("ping", e, onEvent)
@@ -56,12 +57,16 @@ export function connectSse(
     connected = true;
   };
   source.onerror = () => {
-    // 仅在连接状态发生转变（已连接 → 断开）时上报一次错误，
-    // EventSource 自动重试期间的连续 onerror 不再重复推送。
+    // 首次 onerror（无论是否曾连上）上报一次错误：后端不可达时页面
+    // 也能得到提示，而不是永远停留在"等待事件…"。
     if (connected) {
       connected = false;
       onEvent({ type: "error", data: {} });
+    } else if (!reportedDown) {
+      reportedDown = true;
+      onEvent({ type: "error", data: {} });
     }
+    // 其余情况：EventSource 自动重试期间的连续 onerror 不再重复推送。
   };
   return () => source.close();
 }

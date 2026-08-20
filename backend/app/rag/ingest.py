@@ -29,6 +29,8 @@ def load_corpus(jsonl_path: str | Path) -> list[dict]:
                 p = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(p, dict):
+                continue  # 非对象 JSON 行（数组/字符串等）跳过
             city = p.get("city")
             if not city or city not in CITY_EN or p.get("category") not in VALID_CATEGORIES:
                 continue
