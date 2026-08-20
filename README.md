@@ -11,7 +11,7 @@ FastAPI 后端 + React 前端，SSE 实时推送协作过程。
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Python 3.11+ · FastAPI · LangGraph · SQLite · httpx |
+| 后端 | Python 3.11+ · FastAPI · LangGraph（含 langgraph-checkpoint-sqlite 会话持久化） · SQLite · httpx |
 | LLM | DeepSeek（OpenAI 兼容，JSON 模式） |
 | **RAG 知识库** | **Chroma + BGE（bge-small-zh-v1.5，ModelScope 下载）**，全国 34 省级行政区著名景点（省份-城市-景点三级粒度检索） |
 | 前端 | React 19 · Vite 8 · TypeScript · Tailwind v4 |
@@ -52,6 +52,8 @@ npm run dev        # http://localhost:5173（/api 代理到 :8000）
 浏览器打开 http://localhost:5173，输入"10月去成都玩3天，预算8000，喜欢美食"，
 右侧 Agent 协作面板会实时显示各 Agent 的工作状态。
 输入"广东"会检索全省著名景点；输入库外城市"佛山"，则 fallback 到广东省其他景点。
+继续发送"第二天换成博物馆"，助手会保留目的地/天数/预算，重排出一份完整新行程；
+刷新页面后历史对话自动恢复，可继续追问。
 
 > 语料为 **AI 生成示例数据，坐标仅供参考**；如某城数据不理想，可编辑
 > `backend/data/poi_corpus.jsonl` 后重跑 `python -m app.rag.ingest` 增量入库。
@@ -69,7 +71,7 @@ cd backend && .venv/Scripts/python -m pytest -v   # 全部用 mock（FakeProvide
 | M1 骨架（FastAPI + SSE + SQLite + 图 + 前端骨架） | ✅ 完成 |
 | M2 最小闭环（DeepSeek + **RAG POI 知识库** + Analyst/Planner + 天气） | ✅ 完成 |
 | M3 完整协作（34 省景点库 + Supervisor 路由 + Researcher/Budget + 并行） | ✅ 完成 |
-| M4 对话能力（checkpointer + 修改重排） | ⬜ |
+| M4 对话能力（会话持久化 + 修改重排） | ✅ 完成 |
 | M5 地图与交付（Leaflet + 可视化 + 文档 + 演示脚本） | ⬜ |
 
 详细设计见 [docs/superpowers/specs/2026-08-19-travel-assistant-design.md](docs/superpowers/specs/2026-08-19-travel-assistant-design.md)
