@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 
+from app import events
 from app.main import app
 
 
@@ -71,6 +72,37 @@ def test_sse_emits_ping_events():
         assert lines[1].startswith("data: ")
         payload = json.loads(lines[1].split("data: ", 1)[1])
         assert payload["type"] == "ping"
-        assert isinstance(payload["ts"], float)
+        assert isinstance(payload["data"]["ts"], float)
 
     asyncio.run(run())
+
+
+def test_agent_status_flows_through_sse():
+    """发布的事件在事件流中可见（直接 ASGI 驱动，与 M1 同款 harness）。"""
+    sent = {"type": "agent_status", "data": {"agent": "analyst", "status": "start"}}
+    received = {"frames": []}
+    done = asyncio.Event()
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            frame = message.get("body", b"").decode()
+            if not frame:
+                return  # 过滤空 body 分块
+            received["frames"].append(frame)
+            if frame.startswith("event: agent_status"):
+                done.set()
+
+    async def runner():
+        async with asyncio.timeout(5):
+            task = asyncio.create_task(app(_scope(), lambda: None, send))
+            # event_stream() 惰性订阅：等 app 跑起来（订阅建立）再发布
+            await asyncio.sleep(0.05)
+            events.publish(sent)
+            await done.wait()
+            task.cancel()
+
+    asyncio.run(runner())
+    first = next(
+        f for f in received["frames"] if f.startswith("event: agent_status")
+    )
+    assert json.loads(first.split("data: ", 1)[1])["data"]["agent"] == "analyst"

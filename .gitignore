@@ -17,9 +17,8 @@ dist/
 .env
 .env.local
 
-# Vector DB / models
-backend/chroma_data/
-backend/models/
+# RAG data（模型 / Chroma 向量库 / POI 语料，勿提交）
+backend/data/
 
 # IDE
 .idea/
