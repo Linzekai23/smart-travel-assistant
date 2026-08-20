@@ -59,7 +59,7 @@ def researcher_node(
         for p in candidates:
             p["reason"] = reasons.get(p["poi_id"], "")
 
-    lat, lng = (float(candidates[0]["lat"]), float(candidates[0]["lng"])) if candidates else city_coord(province, city)
+    lat, lng = (float(candidates[0]["lat"]), float(candidates[0]["lng"])) if candidates else city_coord(province, None)
     weather = weather_fn(lat, lng, days=profile.get("duration_days", 3))
     events.publish({"type": "agent_status", "data": {"agent": "researcher", "status": "done"}})
     return {"candidates": candidates, "weather": weather, "region_resolved": True}

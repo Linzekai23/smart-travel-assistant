@@ -64,3 +64,22 @@ def test_researcher_prompt_contains_candidates():
     researcher.researcher_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
     prompt = fake.calls[0][-1]["content"]
     assert "广州塔" in prompt and "poi_id" in prompt
+
+
+def test_researcher_no_candidates_uses_province_capital():
+    """已解析区域但候选为空 → 天气锚定省会（city_coord(province, None)），不崩溃。"""
+    state = _state()
+    state["profile"]["destination"] = "河北"
+
+    def normalize(name):
+        if "河北" in name:
+            return ("河北", None)
+        return _normalize(name)
+
+    out = researcher.researcher_node(
+        state, FakeProvider(), weather_fn=fake_weather,
+        search_pois_fn=_search, normalize_region_fn=normalize,
+    )  # type: ignore[arg-type]
+    assert out["region_resolved"] is True
+    assert out["candidates"] == []
+    assert out["weather"] and out["weather"][0]["source"] == "open-meteo"
