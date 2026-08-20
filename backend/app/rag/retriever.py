@@ -1,7 +1,8 @@
-"""RAG 检索对外接口（Planner 依赖注入点）。
+"""RAG 检索对外接口（Researcher 依赖注入点）。
 
-- search_pois：同城 + 类别过滤 + 语义检索（query 为空按 rating 降序）
-- search_nearby："周边"检索 —— 同城 + haversine 距离排序（radius_km 内）
+- normalize_region：省/城市名（中文、别名、拼音）→ (省份简称, 城市名 | None)
+- search_pois：三级粒度 fallback —— 库内城市→该市；库外城市→所在省；直接省名→全省
+- search_nearby：同省候选 + haversine 距离排序（数据量小，全量计算）
 - get_store：惰性单例（CHROMA_PERSIST_DIR + 真实 BGE）；set_store 供测试注入
 """
 from __future__ import annotations
@@ -9,10 +10,12 @@ from __future__ import annotations
 import math
 
 from app.rag.generate import CITY_EN
+from app.rag.province_cities import CITY_TO_PROVINCE, PROVINCE_ALIASES
 from app.rag.vector_store import VectorStore
 
-# 城市别名（中文名 + 拼音，大小写不敏感）
-_CITY_ALIASES: dict[str, str] = {c: c for c in CITY_EN}
+# 城市别名（中文 + 拼音，大小写不敏感）→ 城市名
+# 中文键覆盖全省城市清单（含库外城市如"佛山"，供三级 fallback 经 CITY_TO_PROVINCE 转省）
+_CITY_ALIASES: dict[str, str] = {c: c for c in CITY_TO_PROVINCE}
 _CITY_ALIASES.update({en: c for c, en in CITY_EN.items()})
 
 _store: VectorStore | None = None
@@ -46,23 +49,44 @@ def get_store() -> VectorStore:
     return _store
 
 
-def normalize_city(name: str) -> str | None:
-    """中文名/拼音归一为 CITY_EN 的城市名，无法识别返回 None。"""
-    return _CITY_ALIASES.get(name.strip().lower())
+def normalize_region(name: str) -> tuple[str | None, str | None]:
+    """归一为 (省份简称, 城市名)；城市优先（先匹配城市别名，再匹配省别名）。
+
+    返回示例：("广东", "广州") / ("广东", None) / (None, None)。
+    """
+    key = name.strip().lower()
+    city = _CITY_ALIASES.get(key)
+    if city is not None:
+        return CITY_TO_PROVINCE[city], city
+    province = PROVINCE_ALIASES.get(key)
+    if province is not None:
+        return province, None
+    return None, None
+
+
+def _resolve(name: str) -> tuple[str | None, str | None]:
+    """三级 fallback 决策：城市在库返回 (province, city)；城市不在库返回 (province, None)（全省兜底）。"""
+    province, city = normalize_region(name)
+    if province is None:
+        return None, None
+    if city is None:
+        return province, None
+    if city in CITY_EN:  # 城市在语料中（有拼音即景点城市）
+        return province, city
+    return province, None  # 库外城市 → 所在省兜底
 
 
 def search_pois(
-    city: str,
+    name: str,
     *,
-    category: str | None = None,
     query: str | None = None,
-    k: int = 10,
+    k: int = 8,
 ) -> list[dict]:
-    """同城检索；query 提供时语义排序，否则按 rating 降序。"""
-    city = normalize_city(city)
-    if city is None:
+    """三级粒度检索：库内城市→该市；库外城市/直接省名→全省。"""
+    province, city = _resolve(name)
+    if province is None:
         return []
-    return get_store().query(query or "", city=city, category=category, k=k)
+    return get_store().query(query or "", city=city, province=province, k=k)
 
 
 def get_poi(poi_id: str) -> dict | None:
@@ -91,7 +115,7 @@ def search_nearby(
     radius_km: float = 3.0,
     k: int = 5,
 ) -> list[dict]:
-    """同城候选 + 距离过滤排序的"周边"检索（数据量小，全量计算即可）。"""
+    """候选 + 距离过滤排序的"周边"检索（数据量小，全量计算即可）。"""
     candidates = [p for p in get_store().get_all(category=category) if p.get("lat") is not None]
     scored = []
     for p in candidates:
