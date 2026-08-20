@@ -120,3 +120,21 @@ def test_nodes_publish_agent_status():
         by_agent.setdefault(agent, []).append(status)
     for agent in ("analyst", "researcher", "budget", "planner", "supervisor"):
         assert by_agent.get(agent) == ["start", "done"], f"{agent}: {by_agent.get(agent)}"
+
+
+def test_build_graph_accepts_checkpointer():
+    """compile(checkpointer=...) 注入后状态跨 invoke 延续（同一 thread_id）。"""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    fake = _fake()
+    graph = build_graph(fake, checkpointer=MemorySaver(), **_researcher_kwargs())
+    cfg = {"configurable": {"thread_id": "t1"}}
+    r1 = graph.invoke({"messages": [{"role": "user", "content": "10月去广州玩3天，预算8000"}], "phase": ""}, config=cfg)
+    assert r1["profile"]["destination"] == "广州"
+    r2 = graph.invoke({"messages": [{"role": "user", "content": "第二天换成博物馆"}], "phase": ""}, config=cfg)
+    # 第二次 analyst 提示词应含已有画像（画像跨 invoke 延续）。
+    # 注意：第二次 invoke 会走完 analyst→…→supervisor 全流程，最后一次 LLM 调用是
+    # supervisor；故定位第二次的 analyst 调用（最新一条含"已有画像"标记的调用）。
+    analyst_prompt = next(c[-1]["content"] for c in reversed(fake.calls) if "已有画像" in c[-1]["content"])
+    assert "已有画像" in analyst_prompt
+    assert "广州" in analyst_prompt

@@ -21,12 +21,15 @@ def build_graph(
     weather_fn=_default_weather,
     search_pois_fn=_default_search_pois,
     normalize_region_fn=_default_normalize_region,
+    checkpointer=None,
 ) -> CompiledStateGraph:
     """装配 5 节点图：analyst → ‖researcher‖budget‖ → planner → supervisor → END。
 
     需求缺失时 analyst 追问后直接 END（等待用户下一轮消息）。
     weather_fn / search_pois_fn / normalize_region_fn 为 Researcher 的依赖注入点
-    （测试传 fake 实现，生产用默认真实实现）。"""
+    （测试传 fake 实现，生产用默认真实实现）。
+    checkpointer：langgraph checkpointer（如 SqliteSaver/MemorySaver），
+    传入后同 thread_id 的多次 invoke 自动恢复/延续 state（M4 对话能力）。"""
     g = StateGraph(TravelState)
     g.add_node("analyst", partial(analyst_node, llm=llm_provider))
     g.add_node("researcher", partial(
@@ -55,4 +58,4 @@ def build_graph(
         {"supervisor": "supervisor", END: END},
     )
     g.add_edge("supervisor", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
