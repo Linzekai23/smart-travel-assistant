@@ -8,16 +8,31 @@ interface ChatMessage {
   content: string;
 }
 
+const SESSION_KEY = "travel_session_id";
+
 function App() {
   const [events, setEvents] = useState<ProcessEvent[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // session_id 在页面会话内持续复用，使"Analyst 追问 → 用户补充回答"的
-  // 多轮补全在同一会话内完成（刷新页面则开启新会话）。
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // session_id 持久化到 localStorage：刷新页面后恢复会话（历史消息 + 画像延续）
+  const [sessionId, setSessionId] = useState<string | null>(
+    () => localStorage.getItem(SESSION_KEY),
+  );
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
     return connectSse((ev) => setEvents((prev) => [...prev, ev].slice(-50)));
+  }, []);
+
+  // 刷新后恢复历史消息；失败（后端未启动/会话过期）静默降级为空会话
+  useEffect(() => {
+    const sid = localStorage.getItem(SESSION_KEY);
+    if (!sid) return;
+    fetch(`/api/chat/history?session_id=${encodeURIComponent(sid)}`)
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data) => {
+        if (data?.messages?.length) setMessages(data.messages);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSend = async (text: string) => {
@@ -34,6 +49,7 @@ function App() {
         throw new Error(err?.detail ?? `请求失败 (${resp.status})`);
       }
       const data = await resp.json();
+      localStorage.setItem(SESSION_KEY, data.session_id);
       setSessionId(data.session_id);
       setMessages((prev) => [
         ...prev,
