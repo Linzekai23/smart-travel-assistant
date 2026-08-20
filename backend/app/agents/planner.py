@@ -1,32 +1,28 @@
-"""Planner 行程规划师：画像 + 天气 + RAG 候选（景点/周边餐厅/酒店）→ 天级行程。
+"""Planner 行程规划师：候选景点（Researcher 产出）+ 预算约束（Budget 产出）+ 天气 → 天级行程。
 
-LLM 只产出结构化 JSON（days[] 引用 poi_id），回复文本由 format_itinerary
+LLM 只产出结构化 JSON（days[] 引用候选 poi_id），回复文本由 format_itinerary
 确定性生成 —— 遵循 spec 风险对策"结构化状态，减少自由文本流转"。
-RAG 检索函数通过注入传入（默认 app.rag.retriever），测试注入假实现。
+候选/预算/天气全部来自 state（candidates / budget_plan / weather），
+无依赖注入点；region_resolved=False（未知区域）时直接输出降级提示。
 """
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 
 from app import events
 from app.llm.deepseek import DeepSeekProvider
-from app.rag.retriever import get_poi as _default_get_poi
-from app.rag.retriever import normalize_region as _default_normalize_city
-from app.rag.retriever import search_nearby as _default_search_nearby
-from app.rag.retriever import search_pois as _default_search_pois
-from app.tools.weather_api import get_weather as _default_weather
 
-PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据用户画像、天气与候选 POI 数据，
-生成逐日行程。只输出 JSON 对象（不要 markdown、不要其他文字），schema：
+PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据用户画像、候选景点、预算约束与天气，生成逐日行程。
+只输出 JSON 对象（不要 markdown、不要其他文字），schema：
 {
   "days": [
     {
       "day": 1,
-      "title": "当日主题，如 熊猫基地与宽窄巷子",
+      "title": "当日主题，如 广州地标与珠江夜景",
       "weather_note": "当日天气一句话，如 晴 24°C",
       "items": [
-        {"time": "09:00", "name": "景点名", "poi_id": "候选列表中的 id，必须引用", "note": "为什么去/怎么玩，10-20 字"}
+        {"time": "09:00", "name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "note": "为什么去/怎么玩，10-20 字"},
+        {"time": "12:30", "name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）"}
       ]
     }
   ],
@@ -34,41 +30,22 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
   "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"]
 }
 规则：
-- 每天 3-5 项，时间从早到晚；餐饮穿插在景点之间，优先选景点"周边餐厅"里的
-- 必须从提供的候选 POI 中选取并引用其 poi_id，不要编造
+- 每天 3-5 项，时间从早到晚；餐饮穿插在景点之间，每天 1-2 餐
+- 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
+- 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
+- 住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
-- 天数以 duration_days 为准，不要多排
-"""
+- 天数以 duration_days 为准，不要多排"""
 
 
-def build_candidate_context(
-    profile: dict,
-    search_pois_fn: Callable,
-    search_nearby_fn: Callable,
-) -> str:
-    """RAG 检索候选并拼成 LLM 上下文：景点（附周边餐厅）+ 酒店。"""
-    city = profile["destination"]
-    prefs = " ".join(profile.get("preferences", []))
-    attractions = search_pois_fn(city, category="attraction", query=prefs or None, k=8)
-    hotels = search_pois_fn(city, category="hotel", query=None, k=4)
-
-    lines = ["候选景点（含周边餐厅，周边餐厅可直接选入行程）:"]
-    for poi in attractions:
-        nearby = search_nearby_fn(
-            poi["lat"], poi["lng"], category="restaurant", radius_km=3.0, k=2
-        )
-        nearby_names = "、".join(r["name"] for r in nearby) or "（无）"
-        lines.append(
-            f"- {poi['name']}（评分{poi['rating']}，价位档{poi['price_tier']}）: {poi['description']}"
-            f" | 周边餐厅: {nearby_names}"
-        )
-    lines.append("候选酒店:")
-    for h in hotels:
-        lines.append(
-            f"- {h['name']}（评分{h['rating']}，价位档{h['price_tier']}）: {h['description']}"
-        )
-    return "\n".join(lines)
+def build_candidate_context(candidates: list[dict]) -> str:
+    """把 Researcher 产出的候选景点（POI + 推荐理由）拼成 LLM 上下文。"""
+    lines = ["候选景点（必须从中选景点并引用 poi_id）:"]
+    for p in candidates:
+        reason = f"，推荐理由：{p['reason']}" if p.get("reason") else ""
+        lines.append(f"- {p['name']}（{p['city']}，评分{p['rating']}，价位档{p['price_tier']}）: {p['description']}{reason}")
+    return "\n".join(lines) if lines else "（无候选景点）"
 
 
 def format_itinerary(itinerary: dict) -> str:
@@ -91,63 +68,59 @@ def format_itinerary(itinerary: dict) -> str:
     return "\n".join(lines).strip()
 
 
-def planner_node(
-    state: dict,
-    llm: DeepSeekProvider,
-    *,
-    weather_fn: Callable = _default_weather,
-    search_pois_fn: Callable = _default_search_pois,
-    search_nearby_fn: Callable = _default_search_nearby,
-    get_poi_fn: Callable = _default_get_poi,
-    normalize_city_fn: Callable = _default_normalize_city,
-) -> dict:
+def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
+    """消费 state（candidates/budget_plan/weather）→ LLM 行程 JSON → 幻觉清洗 → 回复。
+
+    region_resolved=False（Researcher 归一化失败）时直接输出降级提示，不调用 LLM
+    （图装配中该分支直接 END，不经 supervisor）。
+    """
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "start"}})
     profile: dict = state.get("profile", {})
-    destination = profile.get("destination", "")
-    _province, city = normalize_city_fn(destination) if destination else (None, None)
-    if city is None:
+    region_resolved = state.get("region_resolved")
+    if region_resolved is False:
+        destination = str(profile.get("destination") or "空")
         events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
         return {
             "phase": "answered",
             "itinerary": {},
             "last_reply": (
-                f"目前暂不支持「{destination or '空'}」的行程规划，"
-                "当前支持约 20 个国内旅游城市：北京、上海、成都、西安、杭州、"
-                "广州、深圳、南京、苏州、重庆、厦门、青岛、大连、长沙、武汉、"
-                "昆明、大理、丽江、三亚、洛阳。"
+                f"目前暂不支持「{destination}」的行程规划，当前支持全国 34 个省级行政区的著名景点。"
             ),
         }
 
-    from app.rag.generate import CITY_COORDS
+    candidates: list[dict] = state.get("candidates", [])
+    budget_plan: dict = state.get("budget_plan", {})
+    weather: list[dict] = state.get("weather", [])
 
-    lat, lng = CITY_COORDS[city]
-    weather = weather_fn(lat, lng, days=profile.get("duration_days", 3))
-    candidate_ctx = build_candidate_context(profile, search_pois_fn, search_nearby_fn)
-
-    llm_messages = [
+    messages = [
         {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
         {"role": "user", "content": (
-            f"画像：{json.dumps(profile, ensure_ascii=False)}\n"
-            f"{candidate_ctx}\n"
+            f"{build_candidate_context(candidates)}\n"
+            f"预算约束：{json.dumps((budget_plan or {}).get('items', []), ensure_ascii=False)}\n"
             f"未来 {len(weather)} 天天气：{json.dumps(weather, ensure_ascii=False)}\n"
-            "请按 schema 输出行程 JSON，所有条目必须引用候选 POI 的 poi_id。"
+            "请按 schema 输出行程 JSON（标记词：行程规划JSON），景点条目必须引用候选 POI 的 poi_id。"
         )},
     ]
-    itinerary = llm.chat_json(llm_messages)
+    try:
+        itinerary = llm.chat_json(messages)
+    except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
+        itinerary = {}
 
-    # 清洗：过滤引用不存在的 poi_id 的条目（LLM 幻觉防护）
+    # 幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）
+    candidate_ids = {p.get("poi_id") for p in candidates if p.get("poi_id")}
     for day in itinerary.get("days") or []:
         kept = []
         for item in day.get("items", []):
             pid = item.get("poi_id")
-            if get_poi_fn(pid) is None:
+            if pid is not None and pid not in candidate_ids:
                 continue  # 编造的 POI 直接丢弃
             kept.append(item)
         day["items"] = kept
 
-    source = "open-meteo" if any(w.get("source") == "open-meteo" for w in weather) else "simulated"
-    reply = format_itinerary(itinerary)
-    if source == "simulated":
-        reply += "\n\n_（天气数据暂不可用，已用模拟数据，仅供参考）_"
+    if itinerary.get("days") is None:
+        # days: null 不做 markdown 格式化，降级为摘要回复（T8-F4 回归）
+        reply = f"行程总结：{itinerary.get('summary', '')}"
+    else:
+        reply = format_itinerary(itinerary)
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
     return {"phase": "answered", "itinerary": itinerary, "last_reply": reply}

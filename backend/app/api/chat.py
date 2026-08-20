@@ -27,7 +27,6 @@ async def chat(req: ChatRequest, request: Request):
     db.add_message(sid, "user", req.message)
     history = db.list_messages(sid)  # [{role, content}]，含刚写入的 user 消息
 
-    events.publish({"type": "agent_status", "data": {"agent": "supervisor", "status": "start", "detail": "开始处理"}})
     try:
         # 多轮画像延续（上次 profile 传回图）依赖 checkpointer，M4 实现；
         # M2 只传会话历史，Analyst 每轮重新抽取。

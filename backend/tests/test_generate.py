@@ -75,3 +75,21 @@ def test_generate_pois_null_tolerated():
     """pois: null 不得崩溃，按空列表处理（T4-F3 回归保持）。"""
     fake = FakeProvider(json_responses={"四川": {"province": "四川", "pois": None}})
     assert generate.generate_province(fake, "四川") == []  # type: ignore[arg-type]
+
+
+def test_validate_tags_string_as_single_tag():
+    """tags 为纯字符串时按单元素列表处理，不逐字拆分（T4-F5）。"""
+    good = {"name": "故宫", "city": "北京", "lat": 39.9, "lng": 116.4,
+            "rating": 4.8, "price_tier": 2, "description": "紫禁城。", "tags": "历史"}
+    out = generate.validate_pois("北京", [good])
+    assert len(out) == 1
+    assert out[0]["tags"] == ["历史"]
+
+
+def test_validate_description_null_normalized():
+    """description 为 null 时归一化为空并丢弃条目，不得残留字面 "None"（T4-F5）。"""
+    good = {"name": "故宫", "city": "北京", "lat": 39.9, "lng": 116.4,
+            "rating": 4.8, "price_tier": 2, "description": "紫禁城。", "tags": ["历史"]}
+    bad = dict(good, name="描述为null", description=None)
+    out = generate.validate_pois("北京", [good, bad])
+    assert len(out) == 1 and out[0]["name"] == "故宫"

@@ -2,6 +2,8 @@ import type { ProcessEvent } from "../api/sse";
 
 const AGENT_NAMES: Record<string, string> = {
   analyst: "需求分析师",
+  researcher: "研究员",
+  budget: "预算官",
   planner: "行程规划师",
   supervisor: "主管",
 };

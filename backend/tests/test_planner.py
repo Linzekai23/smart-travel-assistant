@@ -2,152 +2,107 @@ import json
 
 from app.agents import planner
 
-from conftest import FakeProvider, fake_weather
+from conftest import FakeProvider
+
+CANDIDATES = [
+    {"poi_id": "guangzhou-001", "province": "广东", "city": "广州", "name": "广州塔",
+     "category": "attraction", "lat": 23.1066, "lng": 113.3245, "rating": 4.6,
+     "price_tier": 3, "description": "珠江畔地标。", "tags": ["夜景"], "reason": "夜景绝佳"},
+    {"poi_id": "guangzhou-002", "province": "广东", "city": "广州", "name": "白云山",
+     "category": "attraction", "lat": 23.18, "lng": 113.29, "rating": 4.4,
+     "price_tier": 1, "description": "城市绿肺。", "tags": ["自然"], "reason": ""},
+]
 
 ITINERARY = {
-    "days": [
-        {
-            "day": 1,
-            "title": "熊猫基地与宽窄巷子",
-            "weather_note": "晴 24°C",
-            "items": [
-                {"time": "09:00", "name": "宽窄巷子", "poi_id": "chengdu-001", "note": "早到避开人流"},
-                {"time": "12:00", "name": "蜀大侠火锅（春熙路店）", "poi_id": "chengdu-002", "note": "午餐"},
-            ],
-        }
-    ],
-    "summary": "首日老成都街区线。",
-    "warnings": [],
+    "days": [{"day": 1, "title": "广州地标", "weather_note": "晴 24°C",
+              "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": "夜景"},
+                        {"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+    "summary": "OK", "warnings": [],
 }
 
+BUDGET_PLAN = {
+    "items": [{"category": "住宿", "amount": 3200, "note": "中档酒店"},
+              {"category": "餐饮", "amount": 2400, "note": "粤菜"}],
+    "total": 8000, "checked": True, "scaled": False,
+}
 
-def _fake() -> FakeProvider:
+WEATHER = [{"date": "2026-10-01", "t_max": 24.0, "t_min": 16.0, "condition": "晴", "source": "open-meteo"}]
+
+
+def _fake():
     return FakeProvider(json_responses={"行程": ITINERARY})
 
 
-def _state() -> dict:
+def _state():
     return {
-        "messages": [{"role": "user", "content": "10月去成都玩3天，预算8000，喜欢美食"}],
+        "messages": [{"role": "user", "content": "10月去广州玩3天，预算8000，喜欢美食"}],
         "phase": "planning",
-        "profile": {
-            "destination": "成都", "duration_days": 1, "start_date": "2026-10-01",
-            "budget_cny": 8000, "travelers": 2, "preferences": ["美食"],
-        },
-    }
-
-
-# 注入的假检索器：行为与 retriever 契约一致，但数据可控
-def _fake_search_pois(city, *, category=None, query=None, k=10):
-    assert category is not None  # Planner 必须显式传类别
-    pool = {
-        "attraction": [{"poi_id": "chengdu-001", "city": "成都", "name": "宽窄巷子",
-                        "category": "attraction", "rating": 4.6, "price_tier": 1,
-                        "lat": 30.67, "lng": 104.06, "description": "老成都街区。", "tags": ["老街"]}],
-        "restaurant": [{"poi_id": "chengdu-002", "city": "成都", "name": "蜀大侠火锅（春熙路店）",
-                        "category": "restaurant", "rating": 4.5, "price_tier": 3,
-                        "lat": 30.66, "lng": 104.07, "description": "麻辣火锅。", "tags": ["火锅"]}],
-        "hotel": [{"poi_id": "chengdu-003", "city": "成都", "name": "成都群光君悦酒店",
-                   "category": "hotel", "rating": 4.7, "price_tier": 4,
-                   "lat": 30.66, "lng": 104.08, "description": "春熙路商圈豪华酒店。", "tags": ["商圈"]}],
-    }
-    return pool[category]
-
-
-def _fake_search_nearby(lat, lng, *, category=None, radius_km=3.0, k=5):
-    if category == "restaurant":
-        return [{"poi_id": "chengdu-002", "city": "成都", "name": "蜀大侠火锅（春熙路店）",
-                 "category": "restaurant", "rating": 4.5, "price_tier": 3,
-                 "lat": 30.66, "lng": 104.07, "description": "麻辣火锅。", "tags": ["火锅"]}]
-    return []
-
-
-def _fake_get_poi(poi_id):
-    return _fake_search_pois("成都", category="attraction")[0] if poi_id == "chengdu-001" else None
-
-
-def _fake_normalize_city(name):
-    return "成都" if "成都" in name else None
-
-
-def _kwargs():
-    return {
-        "weather_fn": fake_weather,
-        "search_pois_fn": _fake_search_pois,
-        "search_nearby_fn": _fake_search_nearby,
-        "get_poi_fn": _fake_get_poi,
-        "normalize_city_fn": _fake_normalize_city,
+        "profile": {"destination": "广州", "duration_days": 3, "start_date": "2026-10-01",
+                    "budget_cny": 8000, "travelers": 2, "preferences": ["美食"]},
+        "candidates": CANDIDATES, "budget_plan": BUDGET_PLAN, "weather": WEATHER,
+        "region_resolved": True,
     }
 
 
 def test_planner_produces_reply_and_itinerary():
     fake = _fake()
-    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     assert out["phase"] == "answered"
-    assert out["itinerary"]["days"][0]["items"][0]["poi_id"] == "chengdu-001"
+    assert out["itinerary"]["days"][0]["items"][0]["poi_id"] == "guangzhou-001"
     assert out["last_reply"].startswith("## ")
 
 
-def test_planner_prompt_contains_candidates_and_weather():
+def test_planner_prompt_contains_candidates_budget_weather():
     fake = _fake()
-    planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     prompt = fake.calls[0][-1]["content"]
-    assert "宽窄巷子" in prompt          # 景点候选进上下文
-    assert "蜀大侠火锅" in prompt        # 周边餐厅进上下文
-    assert "成都群光君悦酒店" in prompt  # 酒店候选进上下文
-    assert "poi_id" in prompt            # 要求引用 POI id
-    assert "晴" in prompt                # 天气进上下文
+    assert "广州塔" in prompt and "白云山" in prompt     # 候选进上下文
+    assert "夜景绝佳" in prompt                          # 推荐理由进上下文
+    assert "3200" in prompt                              # 预算约束进上下文
+    assert "晴" in prompt                                # 天气进上下文
 
 
-def test_planner_unknown_city_returns_hint():
+def test_planner_unknown_region_returns_hint():
     fake = _fake()
     state = _state()
+    state["region_resolved"] = False
     state["profile"]["destination"] = "巴黎"
-
-    def normalize(name):
-        return None
-
-    kwargs = _kwargs()
-    kwargs["normalize_city_fn"] = normalize
-    out = planner.planner_node(state, fake, **kwargs)  # type: ignore[arg-type]
+    out = planner.planner_node(state, fake)  # type: ignore[arg-type]
     assert out["phase"] == "answered"
     assert "巴黎" in out["last_reply"]
     assert "暂不支持" in out["last_reply"]
-    assert fake.calls == []  # 未知城市不调用 LLM
+    assert fake.calls == []  # 未知目的地不调用 LLM
 
 
 def test_planner_filters_hallucinated_poi():
-    fake = FakeProvider(json_responses={"行程": {
+    """有 poi_id 但不在候选 → 编造景点，丢弃。"""
+    fake = FakeProvider(json_responses={"行程规划JSON": {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
-                  "items": [{"time": "09:00", "name": "编造的店", "poi_id": "nope-999", "note": ""}]}],
+                  "items": [{"time": "09:00", "name": "编造的景点", "poi_id": "nope-999", "note": ""}]}],
         "summary": "x", "warnings": [],
     }})
-    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
-    assert out["itinerary"]["days"][0]["items"] == []  # 不存在的 poi_id 被清洗
-
-
-def test_planner_filters_item_without_poi_id():
-    """缺 poi_id 的条目是编造项，必须被幻觉清洗丢弃。"""
-    fake = FakeProvider(json_responses={"行程": {
-        "days": [{"day": 1, "title": "x", "weather_note": "晴",
-                  "items": [{"time": "09:00", "name": "没有id的条目", "note": ""}]}],
-        "summary": "x", "warnings": [],
-    }})
-    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     assert out["itinerary"]["days"][0]["items"] == []
+
+
+def test_planner_keeps_example_food_without_poi_id():
+    """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留。"""
+    fake = FakeProvider(json_responses={"行程规划JSON": {
+        "days": [{"day": 1, "title": "x", "weather_note": "晴",
+                  "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+        "summary": "x", "warnings": [],
+    }})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(out["itinerary"]["days"][0]["items"]) == 1
+
+
+def test_planner_days_null_tolerated():
+    fake = FakeProvider(json_responses={"行程规划JSON": {"days": None, "summary": "无行程。", "warnings": []}})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert out["phase"] == "answered"
+    assert "行程总结" in out["last_reply"]
 
 
 def test_format_itinerary_shape():
     text = planner.format_itinerary(ITINERARY)
-    assert "第 1 天" in text and "宽窄巷子" in text
-    assert "09:00" in text and "早到避开人流" in text
-    assert "## " in text
-
-
-def test_planner_days_null_tolerated():
-    """LLM 返回 days: null 时幻觉清洗与格式化均不得崩溃（T8-F4）。"""
-    fake = FakeProvider(json_responses={"行程": {
-        "days": None, "summary": "无行程。", "warnings": [],
-    }})
-    out = planner.planner_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
-    assert out["phase"] == "answered"
-    assert "行程总结" in out["last_reply"]
+    assert "第 1 天" in text and "广州塔" in text and "## " in text

@@ -77,3 +77,39 @@ def test_analyst_second_turn_merges_profile():
     assert out["profile"]["destination"] == "成都"
     assert out["profile"]["budget_cny"] == 8000  # 新信息覆盖旧值
     assert out["profile"]["travelers"] == 2
+
+
+def test_analyst_coerces_numeric_strings_to_int():
+    """LLM 输出数值字符串（"8000"/"3"）时 budget_cny/duration_days 转 int（M3 防御）。"""
+    fake = FakeProvider(
+        json_responses={
+            "成都": {
+                "destination": "成都", "duration_days": "3",
+                "start_date": None, "budget_cny": "8000",
+                "travelers": 2, "preferences": ["美食"],
+                "missing": [],
+            }
+        }
+    )
+    out = analyst.analyst_node(_state([{"role": "user", "content": "10月去成都玩3天，预算8000"}]),
+                               fake)  # type: ignore[arg-type]
+    assert out["profile"]["duration_days"] == 3
+    assert out["profile"]["budget_cny"] == 8000
+
+
+def test_analyst_keeps_non_numeric_budget_as_is():
+    """非数值（如 "三天"）不做强制转换，原样保留。"""
+    fake = FakeProvider(
+        json_responses={
+            "成都": {
+                "destination": "成都", "duration_days": "三天",
+                "start_date": None, "budget_cny": None,
+                "travelers": 1, "preferences": [],
+                "missing": [],
+            }
+        }
+    )
+    out = analyst.analyst_node(_state([{"role": "user", "content": "10月去成都玩3天"}]),
+                               fake)  # type: ignore[arg-type]
+    assert out["profile"]["duration_days"] == "三天"
+    assert "budget_cny" not in out["profile"]  # None（未知）不写入画像

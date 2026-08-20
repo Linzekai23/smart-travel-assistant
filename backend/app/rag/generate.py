@@ -29,14 +29,6 @@ CITY_EN: dict[str, str] = {
     for city, (pinyin, _coord) in d["poi_cities"].items()
 }
 
-# 城市 → 中心坐标（全部 poi_cities 城市，动态生成；planner.py 天气坐标查询
-# 仍依赖此表，待 planner 迁移 city_coord() 后移除）
-CITY_COORDS: dict[str, tuple[float, float]] = {
-    city: coord
-    for d in PROVINCES.values()
-    for city, (_pinyin, coord) in d["poi_cities"].items()
-}
-
 VALID_TIERS = {1, 2, 3, 4}
 
 GENERATE_SYSTEM_PROMPT = """你是中国旅游 POI 数据生成器。为指定省份生成著名旅游景点条目（AI 生成示例数据，坐标仅供参考，要落在对应城市市中心周边合理范围）。

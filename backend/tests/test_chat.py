@@ -5,8 +5,8 @@ from app import db
 from app.graph import build_graph
 from app.main import app
 
-from conftest import FakeProvider, fake_weather
-from test_planner import _kwargs
+from conftest import FakeProvider
+from test_researcher import _kwargs as _researcher_kwargs
 
 ITINERARY = {
     "days": [{"day": 1, "title": "熊猫基地", "weather_note": "晴",
@@ -37,11 +37,15 @@ def client(tmp_path, monkeypatch):
     fake = FakeProvider(
         json_responses={
             "已有画像": {
-                "destination": "成都", "duration_days": 1, "start_date": None,
-                "budget_cny": 8000, "travelers": 2, "preferences": [],
+                "destination": "广州", "duration_days": 3, "start_date": None,
+                "budget_cny": 8000, "travelers": 2, "preferences": ["美食"],
                 "missing": [],
             },
-            "行程": ITINERARY,
+            "推荐要点JSON": {"recommendations": [{"poi_id": "guangzhou-001", "reason": "夜景绝佳"}]},
+            "预算分配JSON": {"items": [{"category": "住宿", "amount": 3200, "note": "中档酒店"}],
+                            "total": 8000},
+            "行程规划JSON": ITINERARY,
+            "汇总JSON": {"summary": "整体节奏合理。", "tips": ["周三起降温"]},
         }
     )
     app.state.graph = None
@@ -49,7 +53,7 @@ def client(tmp_path, monkeypatch):
     # starlette 1.6 无 lifespan="off" 参数，TestClient 总是先执行 lifespan
     # （lifespan 会把 graph 重置为 None），因此进入上下文后再注入假图。
     with TestClient(app) as c:
-        app.state.graph = build_graph(fake, **_kwargs())  # type: ignore[arg-type]
+        app.state.graph = build_graph(fake, **_researcher_kwargs())  # type: ignore[arg-type]
         app.state.llm_configured = True
         yield c
     app.state.graph = None
@@ -57,7 +61,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_chat_returns_reply_and_persists(client):
-    resp = client.post("/api/chat", json={"message": "10月去成都玩3天预算8000"})
+    resp = client.post("/api/chat", json={"message": "10月去广州玩3天预算8000"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"]
@@ -68,7 +72,7 @@ def test_chat_returns_reply_and_persists(client):
 
 
 def test_chat_continues_session(client):
-    r1 = client.post("/api/chat", json={"message": "10月去成都玩3天预算8000"}).json()
+    r1 = client.post("/api/chat", json={"message": "10月去广州玩3天预算8000"}).json()
     r2 = client.post("/api/chat", json={"session_id": r1["session_id"], "message": "第二天换成博物馆"})
     assert r2.status_code == 200
     msgs = db.list_messages(r1["session_id"])
