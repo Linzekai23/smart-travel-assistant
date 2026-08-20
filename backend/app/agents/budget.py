@@ -115,7 +115,7 @@ def budget_node(state: dict, llm: DeepSeekProvider) -> dict:
     try:
         parsed = llm.chat_json(messages)
         items = _clean_items(parsed.get("items"), budget_cny)
-    except (AssertionError, ValueError, KeyError, TypeError):
+    except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
         items = _default_items(budget_cny)
 
     items, scaled = _scale(items, budget_cny)

@@ -53,7 +53,7 @@ def researcher_node(
         ]
         try:
             recs = llm.chat_json(messages)
-        except (AssertionError, ValueError, KeyError, TypeError):
+        except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
             recs = {}
         reasons = {r.get("poi_id"): str(r.get("reason", "")) for r in (recs.get("recommendations") or []) if isinstance(r, dict)}
         for p in candidates:
