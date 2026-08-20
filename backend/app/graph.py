@@ -47,11 +47,11 @@ def build_graph(
     # join：两条边汇入 planner，两分支都完成后才运行（LangGraph superstep join 语义）
     g.add_edge("researcher", "planner")
     g.add_edge("budget", "planner")
-    # planner 未知区域时直接输出降级回复（region_resolved=False），
-    # 不走 supervisor——否则 supervisor 会用空行程覆盖降级回复
+    # planner 未知区域（region_resolved=False）或候选为空（KB 空/未入库）时
+    # 直接输出降级回复，不走 supervisor——否则 supervisor 会用空行程覆盖降级回复
     g.add_conditional_edges(
         "planner",
-        lambda state: END if state.get("region_resolved") is False else "supervisor",
+        lambda state: END if state.get("region_resolved") is False or not state.get("candidates") else "supervisor",
         {"supervisor": "supervisor", END: END},
     )
     g.add_edge("supervisor", END)

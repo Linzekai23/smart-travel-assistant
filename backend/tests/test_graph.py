@@ -70,6 +70,36 @@ def test_unknown_region_ends_with_hint_without_supervisor():
     assert len(fake.calls) == 2
 
 
+def test_empty_candidates_ends_with_planner_degrade_without_supervisor():
+    """KB 空/未入库：researcher 归一化成功但 candidates=[] → planner 降级回复后直接 END，
+    supervisor 不运行（防覆盖降级回复），planner/supervisor 均不调用 LLM。"""
+    fake = FakeProvider(json_responses={
+        "已有画像": {
+            "destination": "河北", "duration_days": 3, "start_date": None,
+            "budget_cny": 8000, "travelers": 2, "preferences": [], "missing": [],
+        },
+        "预算分配JSON": {"items": [{"category": "住宿", "amount": 3200, "note": "中档酒店"}],
+                        "total": 8000},
+    })
+    kwargs = _researcher_kwargs()  # search_pois_fn 仅"广州"返回候选 → 河北返回 []
+
+    def normalize(name):
+        return ("河北", None) if "河北" in name else (None, None)
+
+    kwargs["normalize_region_fn"] = normalize  # 区域归一化成功、候选为空
+    graph = build_graph(fake, **kwargs)  # type: ignore[arg-type]
+    result = graph.invoke({
+        "messages": [{"role": "user", "content": "10月去河北玩3天，预算8000"}],
+        "phase": "",
+    })
+    assert result["phase"] == "answered"
+    assert "该区域暂未检索到景点数据" in result["last_reply"]
+    # planner 降级分支与 supervisor 均未调用 LLM：仅 analyst + budget 共 2 次
+    assert len(fake.calls) == 2
+    assert not any("行程规划JSON" in c[-1]["content"] for c in fake.calls)
+    assert not any("汇总JSON" in c[-1]["content"] for c in fake.calls)
+
+
 def test_nodes_publish_agent_status():
     q = events.subscribe()
     try:
