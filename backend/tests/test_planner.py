@@ -89,25 +89,32 @@ def test_planner_empty_candidates_degrades_without_llm():
 
 
 def test_planner_filters_hallucinated_poi():
-    """有 poi_id 但不在候选 → 编造景点，丢弃。"""
-    fake = FakeProvider(json_responses={"行程规划JSON": {
+    """有 poi_id 但不在候选 → 编造景点丢弃；零引用兜底注入后仅剩 top 候选条目。"""
+    hallucinated = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
                   "items": [{"time": "09:00", "name": "编造的景点", "poi_id": "nope-999", "note": ""}]}],
         "summary": "x", "warnings": [],
-    }})
+    }
+    fake = FakeProvider(json_responses={"行程规划JSON": hallucinated,
+                                        "上一版行程没有引用": hallucinated})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert out["itinerary"]["days"][0]["items"] == []
+    items = out["itinerary"]["days"][0]["items"]
+    assert [i["name"] for i in items] == ["广州塔"]  # 编造的景点被丢弃，只剩注入的 top 候选
 
 
 def test_planner_keeps_example_food_without_poi_id():
-    """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留。"""
-    fake = FakeProvider(json_responses={"行程规划JSON": {
+    """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留（注入条目前置、示例条目仍在）。"""
+    zero_ref = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
                   "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
         "summary": "x", "warnings": [],
-    }})
+    }
+    fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
+                                        "上一版行程没有引用": zero_ref})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert len(out["itinerary"]["days"][0]["items"]) == 1
+    items = out["itinerary"]["days"][0]["items"]
+    assert items[0]["poi_id"] == "guangzhou-001"                     # 注入的 top 候选
+    assert items[1]["name"] == "点都德（示例）" and "poi_id" not in items[1]  # 示例条目保留
 
 
 def test_planner_days_null_tolerated():
@@ -120,3 +127,91 @@ def test_planner_days_null_tolerated():
 def test_format_itinerary_shape():
     text = planner.format_itinerary(ITINERARY)
     assert "第 1 天" in text and "广州塔" in text and "## " in text
+
+
+def test_planner_enriches_itinerary_with_candidate_coords():
+    fake = _fake()
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"
+    assert item["lat"] == 23.1066 and item["lng"] == 113.3245
+    food = out["itinerary"]["days"][0]["items"][1]
+    assert "lat" not in food  # 示例餐饮无坐标，不上地图
+
+
+def test_planner_publishes_itinerary_update(monkeypatch):
+    published: list[dict] = []
+    monkeypatch.setattr("app.agents.planner.events.publish", lambda p: published.append(p))
+    fake = _fake()
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    updates = [p for p in published if p["type"] == "itinerary_update"]
+    assert len(updates) == 1
+    assert updates[0]["data"]["status"] == "generated"
+    assert updates[0]["data"]["itinerary"]["days"][0]["items"][0]["lat"] == 23.1066
+
+
+def test_planner_llm_failure_returns_summary_reply_without_event(monkeypatch):
+    """LLM 异常（chat_json 抛错 → itinerary={}）→ days-None 降级回复，且不发布空行程事件。"""
+    published: list[dict] = []
+    monkeypatch.setattr("app.agents.planner.events.publish", lambda p: published.append(p))
+    out = planner.planner_node(_state(), FakeProvider())  # type: ignore[arg-type]
+    assert out["last_reply"] == "行程总结："  # 降级分支存活（T8-F4 回归）
+    assert not [p for p in published if p["type"] == "itinerary_update"]
+
+
+def test_planner_retries_once_when_zero_candidate_reference():
+    """零引用（地图空图）→ 追加纠正指令重试一次，第二次引用候选 → 行程含引用。"""
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                                   "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                         "summary": "x", "warnings": []},
+        "上一版行程没有引用": {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                                         "items": [{"time": "09:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+                               "summary": "x", "warnings": []},
+    })
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 2  # 重试了一次
+    assert "上一版行程没有引用" in fake.calls[-1][-1]["content"]  # 纠正指令送达
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"
+    assert item["lat"] == 23.1066  # 富化正常（现有集成）
+
+
+def test_planner_zero_reference_twice_still_terminates():
+    """两轮都零引用 → 不再重试，注入 top 候选兜底，正常格式化（不无限循环）。"""
+    zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                          "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
+                                        "上一版行程没有引用": zero_ref})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 2
+    assert out["last_reply"].startswith("## ")
+
+
+def test_planner_llm_exception_no_retry():
+    """LLM 异常 → 不重试，走 days-None 降级。"""
+    fake = FakeProvider()  # 无响应配置 → chat_json 抛 AssertionError
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 1
+    assert out["last_reply"] == "行程总结："
+
+
+def test_planner_prompt_requires_candidate_reference():
+    assert "每天必须至少安排 1-2 个候选景点并引用其 poi_id" in planner.PLANNER_SYSTEM_PROMPT
+
+
+def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
+    """两轮 LLM 零引用 → 确定性注入 top-1 候选（带坐标，地图必有点）。"""
+    zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                          "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
+                                        "上一版行程没有引用": zero_ref})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 2  # 重试照常
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"  # CANDIDATES[0]（广州塔）
+    assert item["name"] == "广州塔"
+    assert item["note"] == "推荐安排"
+    assert item["lat"] == 23.1066  # 富化正常

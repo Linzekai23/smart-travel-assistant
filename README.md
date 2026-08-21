@@ -23,9 +23,20 @@ FastAPI 后端 + React 前端，SSE 实时推送协作过程。
 backend/   FastAPI + LangGraph（agents/ 节点 · rag/ 向量知识库 · tools/ 天气 · llm/ Provider · api/）
 frontend/  React 三栏骨架（聊天 / 行程主区域 / Agent 协作面板）
 docs/      设计文档与里程碑计划
+scripts/    一键启动脚本（bash scripts/dev.sh）
 ```
 
 ## 快速开始
+
+### 一键启动（推荐）
+
+```bash
+bash scripts/dev.sh           # 依赖与 RAG 库就绪时直接启动（后端 + 前端 + 打开浏览器）
+bash scripts/dev.sh --setup   # 首次运行：自动下载 BGE 模型、生成 34 省语料、向量入库后启动
+```
+
+> 需先配置 `DEEPSEEK_API_KEY` 环境变量；脚本会自动检查后端/前端依赖与 RAG 库是否就绪。
+> 架构与协作设计（mermaid 图）见 [docs/architecture.md](docs/architecture.md)。
 
 ### 1. 后端
 
@@ -72,6 +83,6 @@ cd backend && .venv/Scripts/python -m pytest -v   # 全部用 mock（FakeProvide
 | M2 最小闭环（DeepSeek + **RAG POI 知识库** + Analyst/Planner + 天气） | ✅ 完成 |
 | M3 完整协作（34 省景点库 + Supervisor 路由 + Researcher/Budget + 并行） | ✅ 完成 |
 | M4 对话能力（会话持久化 + 修改重排） | ✅ 完成 |
-| M5 地图与交付（Leaflet + 可视化 + 文档 + 演示脚本） | ⬜ |
+| M5 地图与交付（Leaflet 地图 + 结构化日卡 + 文档 + 演示脚本） | ✅ 完成 |
 
 详细设计见 [docs/superpowers/specs/2026-08-19-travel-assistant-design.md](docs/superpowers/specs/2026-08-19-travel-assistant-design.md)

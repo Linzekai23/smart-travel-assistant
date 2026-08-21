@@ -80,10 +80,14 @@ def analyst_node(state: dict, llm: DeepSeekProvider) -> dict:
     missing = [f for f in parsed.get("missing", []) if f in CORE_FIELDS]
     if missing:
         events.publish({"type": "agent_status", "data": {"agent": "analyst", "status": "done"}})
+        # 追问轮必须覆盖 last_reply：checkpointer 恢复的旧 state 里 last_reply 仍是
+        # 上一轮的完整回复，若不在本分支覆盖，聊天 API 会把旧回复当成本轮回复返回
+        question = build_question(missing)
         return {
             "phase": "asking",
-            "messages": [{"role": "assistant", "content": build_question(missing)}],
+            "messages": [{"role": "assistant", "content": question}],
             "profile": profile,
+            "last_reply": question,
         }
     events.publish({"type": "agent_status", "data": {"agent": "analyst", "status": "done"}})
     return {"phase": "planning", "profile": profile}
