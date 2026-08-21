@@ -89,7 +89,7 @@ def test_planner_empty_candidates_degrades_without_llm():
 
 
 def test_planner_filters_hallucinated_poi():
-    """有 poi_id 但不在候选 → 编造景点，丢弃（纠正重试轮同样清洗）。"""
+    """有 poi_id 但不在候选 → 编造景点丢弃；零引用兜底注入后仅剩 top 候选条目。"""
     hallucinated = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
                   "items": [{"time": "09:00", "name": "编造的景点", "poi_id": "nope-999", "note": ""}]}],
@@ -98,11 +98,12 @@ def test_planner_filters_hallucinated_poi():
     fake = FakeProvider(json_responses={"行程规划JSON": hallucinated,
                                         "上一版行程没有引用": hallucinated})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert out["itinerary"]["days"][0]["items"] == []
+    items = out["itinerary"]["days"][0]["items"]
+    assert [i["name"] for i in items] == ["广州塔"]  # 编造的景点被丢弃，只剩注入的 top 候选
 
 
 def test_planner_keeps_example_food_without_poi_id():
-    """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留（两轮均零引用）。"""
+    """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留（注入条目前置、示例条目仍在）。"""
     zero_ref = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
                   "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
@@ -111,7 +112,9 @@ def test_planner_keeps_example_food_without_poi_id():
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
                                         "上一版行程没有引用": zero_ref})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert len(out["itinerary"]["days"][0]["items"]) == 1
+    items = out["itinerary"]["days"][0]["items"]
+    assert items[0]["poi_id"] == "guangzhou-001"                     # 注入的 top 候选
+    assert items[1]["name"] == "点都德（示例）" and "poi_id" not in items[1]  # 示例条目保留
 
 
 def test_planner_days_null_tolerated():
@@ -175,7 +178,7 @@ def test_planner_retries_once_when_zero_candidate_reference():
 
 
 def test_planner_zero_reference_twice_still_terminates():
-    """两轮都零引用 → 不再重试，正常格式化（不无限循环）。"""
+    """两轮都零引用 → 不再重试，注入 top 候选兜底，正常格式化（不无限循环）。"""
     zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
                           "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
@@ -196,3 +199,19 @@ def test_planner_llm_exception_no_retry():
 
 def test_planner_prompt_requires_candidate_reference():
     assert "每天必须至少安排 1-2 个候选景点并引用其 poi_id" in planner.PLANNER_SYSTEM_PROMPT
+
+
+def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
+    """两轮 LLM 零引用 → 确定性注入 top-1 候选（带坐标，地图必有点）。"""
+    zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                          "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
+                                        "上一版行程没有引用": zero_ref})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 2  # 重试照常
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"  # CANDIDATES[0]（广州塔）
+    assert item["name"] == "广州塔"
+    assert item["note"] == "推荐安排"
+    assert item["lat"] == 23.1066  # 富化正常

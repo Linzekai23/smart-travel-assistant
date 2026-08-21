@@ -156,6 +156,15 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             "并引用 poi_id，仅餐厅/酒店等非景点条目可标注（示例））。请重新输出行程 JSON。"
         )})
 
+    # 兜底：两轮 LLM 均零引用候选 → 确定性注入 top-1 候选（地图数据链保证；M5 冒烟
+    # 实证真实 LLM 会连续两轮规避引用规则，纯提示词级重试不足以保证标记）
+    if itinerary.get("days") and not _has_candidate_reference(itinerary) and candidates:
+        top = candidates[0]
+        first = itinerary["days"][0]
+        injected = {"time": "09:00", "name": top["name"], "poi_id": top["poi_id"],
+                    "note": "推荐安排"}
+        first["items"] = [injected] + (first.get("items") or [])
+
     # M5：富化行程（景点条目按 poi_id 附候选坐标），供前端地图/日卡与 trip 落库
     itinerary = enrich_itinerary(itinerary, candidates)
 
