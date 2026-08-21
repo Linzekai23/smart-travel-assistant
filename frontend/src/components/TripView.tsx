@@ -80,10 +80,16 @@ export default function TripView({ trip, reply }: Props) {
   );
 
   const budget = trip.budget_plan ?? {};
-  const active: number | "all" =
-    activeDay === "all" ? "all" : Number(activeDay);
+  // activeDay 防悬挂：重规划后天数变少时（如第3天被裁掉），
+  // 将不存在的 tab 钳制回 "all"，避免 Tabs 无匹配项 + 地图/日卡空白
+  const active =
+    activeDay === "all" || days.some((d) => String(d.day) === activeDay)
+      ? activeDay
+      : "all";
   const visibleDays =
-    active === "all" ? days : days.filter((d) => d.day === active);
+    active === "all"
+      ? days
+      : days.filter((d) => String(d.day) === active);
 
   const tabItems = [
     { key: "all", label: "全部" },
@@ -93,11 +99,14 @@ export default function TripView({ trip, reply }: Props) {
   return (
     <div className="space-y-4">
       {/* 按天过滤 tabs */}
-      <Tabs activeKey={activeDay} onChange={setActiveDay} items={tabItems} />
+      <Tabs activeKey={active} onChange={setActiveDay} items={tabItems} />
 
       {/* 地图：保持纯 div 容器（leaflet 需要零内边距，不包 Card） */}
       <div className="h-[40vh] min-h-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <ItineraryMap days={geoDays} activeDay={active} />
+        <ItineraryMap
+          days={geoDays}
+          activeDay={active === "all" ? "all" : Number(active)}
+        />
       </div>
 
       {/* 日卡 */}
@@ -137,7 +146,7 @@ export default function TripView({ trip, reply }: Props) {
           <Table<BudgetRow>
             size="small"
             pagination={false}
-            rowKey={(_, i) => i!}
+            rowKey="key"
             columns={budgetColumns}
             dataSource={budget.items.map((it, i) => ({ key: i, ...it }))}
             footer={

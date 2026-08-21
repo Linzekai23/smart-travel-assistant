@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import EmptyState from "./components/EmptyState";
 import TopBar from "./components/TopBar";
@@ -14,6 +14,8 @@ function App() {
     () => localStorage.getItem(SESSION_KEY),
   );
   const [sending, setSending] = useState(false);
+  // 请求纪元：handleReset 时 +1，过期请求的响应/错误一律丢弃，防止旧会话复活
+  const epochRef = useRef(0);
 
   // 刷新后恢复历史消息与最新行程；失败（后端未启动/会话过期）静默降级为空会话
   useEffect(() => {
@@ -39,8 +41,12 @@ function App() {
   }, []);
 
   const handleSend = async (text: string) => {
+    // 在途防重：请求未返回期间 trip 仍为 null，EmptyState 的"试试"按钮仍可点，
+    // 二次点击会并发发出两个 /api/chat（双会话、双气泡）
+    if (sending) return;
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setSending(true);
+    const epoch = epochRef.current;
     try {
       const resp = await fetch("/api/chat", {
         method: "POST",
@@ -52,6 +58,8 @@ function App() {
         throw new Error(err?.detail ?? `请求失败 (${resp.status})`);
       }
       const data = await resp.json();
+      // 响应返回前用户已点"新对话"：丢弃过期结果，不写 localStorage、不改 state、不追加消息
+      if (epoch !== epochRef.current) return;
       localStorage.setItem(SESSION_KEY, data.session_id);
       setSessionId(data.session_id);
       setTrip(data.trip ?? null);
@@ -60,6 +68,8 @@ function App() {
         { role: "assistant", content: data.reply },
       ]);
     } catch (err) {
+      // 重置后到达的失败同样静默丢弃（旧请求不该再往新会话塞错误气泡）
+      if (epoch !== epochRef.current) return;
       // 发送失败不保留旧 trip：否则错误消息成为最后一条 assistant 消息且 trip 非空，
       // 会被渲染成旧地图 TripView（stale 数据误导用户）
       setTrip(null);
@@ -78,6 +88,7 @@ function App() {
 
   // 开启新对话：清除本地会话标识与全部状态，回到全新会话
   const handleReset = () => {
+    epochRef.current += 1; // 使在途请求的后续处理失效
     localStorage.removeItem(SESSION_KEY);
     setSessionId(null);
     setMessages([]);
