@@ -33,6 +33,7 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 规则：
 - 每天 3-5 项，时间从早到晚；餐饮穿插在景点之间，每天 1-2 餐
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
+- 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
 - 住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
@@ -67,6 +68,27 @@ def format_itinerary(itinerary: dict) -> str:
     for w in itinerary.get("warnings", []):
         lines.append(f"⚠️ {w}")
     return "\n".join(lines).strip()
+
+
+def _clean_itinerary(itinerary: dict, candidate_ids: set) -> None:
+    """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）。"""
+    for day in itinerary.get("days") or []:
+        kept = []
+        for item in day.get("items", []):
+            pid = item.get("poi_id")
+            if pid is not None and pid not in candidate_ids:
+                continue  # 编造的 POI 直接丢弃
+            kept.append(item)
+        day["items"] = kept
+
+
+def _has_candidate_reference(itinerary: dict) -> bool:
+    """行程中是否存在至少一个引用候选 poi_id 的条目（无引用 = 地图空图）。"""
+    return any(
+        item.get("poi_id") is not None
+        for day in itinerary.get("days") or []
+        for item in day.get("items", [])
+    )
 
 
 def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
@@ -116,21 +138,23 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             "请按 schema 输出行程 JSON（标记词：行程规划JSON），景点条目必须引用候选 POI 的 poi_id。"
         )},
     ]
-    try:
-        itinerary = llm.chat_json(messages)
-    except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
-        itinerary = {}
-
-    # 幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）
     candidate_ids = {p.get("poi_id") for p in candidates if p.get("poi_id")}
-    for day in itinerary.get("days") or []:
-        kept = []
-        for item in day.get("items", []):
-            pid = item.get("poi_id")
-            if pid is not None and pid not in candidate_ids:
-                continue  # 编造的 POI 直接丢弃
-            kept.append(item)
-        day["items"] = kept
+    itinerary = {}
+    for attempt in range(2):
+        try:
+            itinerary = llm.chat_json(messages)
+        except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
+            itinerary = {}
+            break  # LLM 异常走既有降级路径（days-None 分支）
+        _clean_itinerary(itinerary, candidate_ids)
+        if not itinerary.get("days") or _has_candidate_reference(itinerary):
+            break
+        # 零引用兜底：追加纠正指令重试一次（无引用 = 地图空图，M5 冒烟实证 LLM 会
+        # 把所有条目标（示例）规避引用规则）
+        messages.append({"role": "user", "content": (
+            "上一版行程没有引用任何候选景点的 poi_id，违反规则（每天至少 1-2 个候选景点"
+            "并引用 poi_id，仅餐厅/酒店等非景点条目可标注（示例））。请重新输出行程 JSON。"
+        )})
 
     # M5：富化行程（景点条目按 poi_id 附候选坐标），供前端地图/日卡与 trip 落库
     itinerary = enrich_itinerary(itinerary, candidates)

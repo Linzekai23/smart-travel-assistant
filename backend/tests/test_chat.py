@@ -26,6 +26,18 @@ class ReplanFakeProvider(FakeProvider):
         self._itinerary_rounds = 0
 
     def chat_json(self, messages: list[dict]) -> dict:
+        if "上一版行程没有引用" in messages[-1]["content"]:
+            # planner 零引用兜底的重试轮：返回带 poi_id 引用的博物馆行程
+            # （无引用会触发纠正重试；本 fake 未配置纠正响应则抛错降级，回复不满足断言）
+            self.calls.append(messages)
+            base = self.json_responses["行程规划JSON"]
+            return {
+                "days": [{"day": 1, "title": "博物馆日", "weather_note": "晴",
+                          "items": [{"time": "14:00", "name": "广州博物馆",
+                                     "poi_id": "guangzhou-001", "note": "按修改要求"}]}],
+                "summary": base.get("summary"),
+                "warnings": list(base.get("warnings", [])),
+            }
         resp = super().chat_json(messages)
         if "行程规划JSON" in messages[-1]["content"]:
             self._itinerary_rounds += 1
