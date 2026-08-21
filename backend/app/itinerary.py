@@ -9,6 +9,9 @@ def enrich_itinerary(itinerary: dict, candidates: list[dict]) -> dict:
     无 poi_id 的条目（LLM 生成的示例餐饮/住宿，语料无坐标）或未命中 → 原样保留。
     非破坏性：返回新结构、不修改入参（测试 fake 常量共享嵌套 dict，原地改会串用例）。
     """
+    if not itinerary.get("days"):
+        # days: None 透传：planner 的 days-None 降级分支（T8-F4 回归）依赖此语义
+        return dict(itinerary)
     by_id = {p.get("poi_id"): p for p in candidates if p.get("poi_id")}
     days = []
     for day in itinerary.get("days") or []:

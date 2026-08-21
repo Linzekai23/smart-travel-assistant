@@ -140,7 +140,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         reply = f"行程总结：{itinerary.get('summary', '')}"
     else:
         reply = format_itinerary(itinerary)
+        # 仅真实行程发布 itinerary_update（降级分支无行程可发，与早退分支一致）
+        events.publish({"type": "itinerary_update",
+                        "data": {"status": "generated", "itinerary": itinerary}})
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
-    events.publish({"type": "itinerary_update",
-                    "data": {"status": "generated", "itinerary": itinerary}})
     return {"phase": "answered", "itinerary": itinerary, "last_reply": reply}

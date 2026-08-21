@@ -66,3 +66,8 @@ def test_enrich_does_not_mutate_input():
                            "items": [dict(before)]}], "summary": "", "warnings": []}
     enrich_itinerary(itinerary, CANDIDATES)
     assert itinerary["days"][0]["items"][0] == before  # 入参未被原地修改
+
+
+def test_enrich_days_none_passthrough():
+    out = enrich_itinerary({"days": None, "summary": "x", "warnings": []}, CANDIDATES)
+    assert out["days"] is None  # days: None 透传（planner days-None 降级分支依赖此语义）

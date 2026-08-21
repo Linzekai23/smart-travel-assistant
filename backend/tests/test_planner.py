@@ -141,3 +141,12 @@ def test_planner_publishes_itinerary_update(monkeypatch):
     assert len(updates) == 1
     assert updates[0]["data"]["status"] == "generated"
     assert updates[0]["data"]["itinerary"]["days"][0]["items"][0]["lat"] == 23.1066
+
+
+def test_planner_llm_failure_returns_summary_reply_without_event(monkeypatch):
+    """LLM 异常（chat_json 抛错 → itinerary={}）→ days-None 降级回复，且不发布空行程事件。"""
+    published: list[dict] = []
+    monkeypatch.setattr("app.agents.planner.events.publish", lambda p: published.append(p))
+    out = planner.planner_node(_state(), FakeProvider())  # type: ignore[arg-type]
+    assert out["last_reply"] == "行程总结："  # 降级分支存活（T8-F4 回归）
+    assert not [p for p in published if p["type"] == "itinerary_update"]
