@@ -1,5 +1,7 @@
-"""聊天 API：POST /api/chat —— 会话持久化 + 图调用 + 回复；GET /api/chat/history —— 历史恢复。"""
+"""聊天 API：POST /api/chat —— 会话持久化 + 图调用 + 回复（含 trip 载荷）；
+GET /api/chat/history —— 历史恢复；GET /api/itinerary —— 最新结构化行程。"""
 import asyncio
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -30,6 +32,23 @@ def _graph_for_request(request: Request):
     """每请求构建带 checkpointer 的图实例（图装配开销 ≪ LLM 调用）。"""
     provider = request.app.state.provider
     return build_graph(provider, checkpointer=_new_checkpointer())
+
+
+def _build_trip(result: dict) -> dict | None:
+    """组装前端 trip 载荷：结构化行程 + 预算 + 汇总建议。
+
+    追问轮/降级回复（无 itinerary 或 days 为空）→ None，前端回退纯文本渲染。
+    """
+    itinerary = result.get("itinerary")
+    if not itinerary or not itinerary.get("days"):
+        return None
+    summary = result.get("supervisor_summary") or {}
+    return {
+        "itinerary": itinerary,
+        "budget_plan": result.get("budget_plan") or {},
+        "summary": summary.get("summary") or "",
+        "tips": summary.get("tips") or [],
+    }
 
 
 @router.post("/api/chat")
@@ -64,8 +83,12 @@ async def chat(req: ChatRequest, request: Request):
         reply = result["messages"][-1].get("content")
     if reply is None:
         reply = "抱歉，本次没有生成回复。"
-    db.add_message(sid, "assistant", reply)
-    return {"session_id": sid, "reply": reply}
+    trip = _build_trip(result)
+    db.add_message(
+        sid, "assistant", reply,
+        trip_json=json.dumps(trip, ensure_ascii=False) if trip else None,
+    )
+    return {"session_id": sid, "reply": reply, "trip": trip}
 
 
 @router.get("/api/chat/history")
@@ -73,3 +96,14 @@ async def history(session_id: str):
     if db.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"session_id": session_id, "messages": db.list_messages(session_id)}
+
+
+@router.get("/api/itinerary")
+async def itinerary(session_id: str):
+    """最新一条结构化行程（刷新后恢复地图/日卡）；无会话或无行程 → 404。"""
+    if db.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    trip = db.get_latest_trip(session_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="该会话暂无行程")
+    return {"session_id": session_id, "trip": trip}

@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import uuid
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT NOT NULL REFERENCES sessions(id),
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    trip_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -31,6 +33,10 @@ def init_db() -> None:
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        # M4 前旧库迁移：messages 表缺 trip_json 列 → ALTER 补列（既有数据不破坏）
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "trip_json" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN trip_json TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -58,12 +64,12 @@ def get_session(sid: str) -> dict | None:
     return dict(row) if row else None
 
 
-def add_message(sid: str, role: str, content: str) -> None:
+def add_message(sid: str, role: str, content: str, trip_json: str | None = None) -> None:
     conn = get_conn()
     try:
         conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-            (sid, role, content),
+            "INSERT INTO messages (session_id, role, content, trip_json) VALUES (?, ?, ?, ?)",
+            (sid, role, content, trip_json),
         )
         conn.commit()
     finally:
@@ -80,3 +86,17 @@ def list_messages(sid: str) -> list[dict]:
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+def get_latest_trip(sid: str) -> dict | None:
+    """最新一条非空结构化行程（重排语义：仅最新行程有效，旧行程被整体覆盖）。"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT trip_json FROM messages WHERE session_id = ? AND trip_json IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (sid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row["trip_json"]) if row else None
