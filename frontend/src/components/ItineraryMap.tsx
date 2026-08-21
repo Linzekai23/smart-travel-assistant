@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
+import { BRAND } from "../theme";
 
 export interface MapPoint {
   name: string;
@@ -24,7 +25,7 @@ const TILE_URL =
 function makeIcon(day: number, index: number) {
   return L.divIcon({
     className: "",
-    html: `<div style="background:#2563eb;color:#fff;border-radius:9999px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${day}-${index + 1}</div>`,
+    html: `<div style="background:${BRAND};color:#fff;border-radius:9999px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${day}-${index + 1}</div>`,
     iconSize: [20, 20],
     iconAnchor: [10, 10],
   });
@@ -68,7 +69,7 @@ export default function ItineraryMap({ days, activeDay }: Props) {
               <Popup>
                 <div className="text-xs">
                   <p className="font-semibold">{p.name}</p>
-                  {p.time && <p>🕐 {p.time}</p>}
+                  {p.time && <p>时间：{p.time}</p>}
                   {p.note && <p>{p.note}</p>}
                 </div>
               </Popup>
@@ -80,7 +81,7 @@ export default function ItineraryMap({ days, activeDay }: Props) {
             <Polyline
               key={`line-${d.day}`}
               positions={d.points.map((p) => [p.lat, p.lng] as [number, number])}
-              pathOptions={{ color: "#2563eb", weight: 3, dashArray: "6 4" }}
+              pathOptions={{ color: BRAND, weight: 3, dashArray: "6 4" }}
             />
           ) : null,
         )}
