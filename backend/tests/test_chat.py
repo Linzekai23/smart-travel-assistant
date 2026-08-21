@@ -235,6 +235,29 @@ def test_chat_asking_round_trip_is_null(client):
     assert "想去哪个城市" in r["reply"]
 
 
+def test_chat_asking_after_completed_trip_returns_null_trip(client):
+    """已完成行程的会话上发生追问轮（checkpointer 恢复旧 itinerary）→ trip 仍为 null。
+
+    回归：追问轮 analyst 只返回 phase=asking，不覆盖 itinerary；checkpointer 恢复
+    上一轮的旧 itinerary 后，_build_trip 若只看 itinerary 有无 days，会把旧行程
+    当作本轮 trip 返回 → 前端把追问消息渲染成旧地图 TripView（违反 trip:null 契约）。
+    """
+    r1 = client.post("/api/chat", json={"message": "10月去广州玩3天预算8000"}).json()
+    assert r1["trip"] is not None  # 前置：第一轮已完成并落库行程
+    client.app.state.provider.json_responses["最新需求"] = {
+        "destination": None, "duration_days": 3, "start_date": None,
+        "budget_cny": 8000, "travelers": 2, "preferences": ["美食"],
+        "missing": ["destination"],
+    }
+    resp = client.post("/api/chat", json={
+        "session_id": r1["session_id"], "message": "预算能再压一点吗",
+    })
+    assert resp.status_code == 200
+    r2 = resp.json()
+    assert "想去哪个城市" in r2["reply"]  # 确为追问轮（非重跑全流程）
+    assert r2["trip"] is None
+
+
 def test_itinerary_endpoint_returns_latest_trip(client):
     r1 = client.post("/api/chat", json={"message": "10月去广州玩3天预算8000"}).json()
     r2 = client.post("/api/chat", json={"session_id": r1["session_id"], "message": "第二天换成博物馆"}).json()

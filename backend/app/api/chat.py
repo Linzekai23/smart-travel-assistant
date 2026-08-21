@@ -38,9 +38,12 @@ def _build_trip(result: dict) -> dict | None:
     """组装前端 trip 载荷：结构化行程 + 预算 + 汇总建议。
 
     追问轮/降级回复（无 itinerary 或 days 为空）→ None，前端回退纯文本渲染。
+    追问轮必须额外按 phase 排除：checkpointer 恢复的旧 state 里 itinerary 仍是
+    上一轮行程，而 analyst 追问分支不覆盖它——仅看 days 会把旧行程当成本轮 trip。
+    （planner/supervisor 恒置 phase=answered，其余分支要么无 itinerary 要么覆盖它。）
     """
     itinerary = result.get("itinerary")
-    if not itinerary or not itinerary.get("days"):
+    if result.get("phase") != "answered" or not itinerary or not itinerary.get("days"):
         return None
     summary = result.get("supervisor_summary") or {}
     return {

@@ -70,6 +70,9 @@ function App() {
         { role: "assistant", content: data.reply },
       ]);
     } catch (err) {
+      // 发送失败不保留旧 trip：否则错误消息成为 lastAssistantIdx 且 trip 非空，
+      // 会被渲染成旧地图 TripView（stale 数据误导用户）
+      setTrip(null);
       setMessages((prev) => [
         ...prev,
         {
