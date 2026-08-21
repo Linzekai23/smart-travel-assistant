@@ -120,3 +120,24 @@ def test_planner_days_null_tolerated():
 def test_format_itinerary_shape():
     text = planner.format_itinerary(ITINERARY)
     assert "第 1 天" in text and "广州塔" in text and "## " in text
+
+
+def test_planner_enriches_itinerary_with_candidate_coords():
+    fake = _fake()
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"
+    assert item["lat"] == 23.1066 and item["lng"] == 113.3245
+    food = out["itinerary"]["days"][0]["items"][1]
+    assert "lat" not in food  # 示例餐饮无坐标，不上地图
+
+
+def test_planner_publishes_itinerary_update(monkeypatch):
+    published: list[dict] = []
+    monkeypatch.setattr("app.agents.planner.events.publish", lambda p: published.append(p))
+    fake = _fake()
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    updates = [p for p in published if p["type"] == "itinerary_update"]
+    assert len(updates) == 1
+    assert updates[0]["data"]["status"] == "generated"
+    assert updates[0]["data"]["itinerary"]["days"][0]["items"][0]["lat"] == 23.1066

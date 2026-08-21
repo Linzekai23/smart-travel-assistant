@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 from app import events
+from app.itinerary import enrich_itinerary
 from app.llm.deepseek import DeepSeekProvider
 
 PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据用户画像、候选景点、预算约束与天气，生成逐日行程。
@@ -131,10 +132,15 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             kept.append(item)
         day["items"] = kept
 
+    # M5：富化行程（景点条目按 poi_id 附候选坐标），供前端地图/日卡与 trip 落库
+    itinerary = enrich_itinerary(itinerary, candidates)
+
     if itinerary.get("days") is None:
         # days: null 不做 markdown 格式化，降级为摘要回复（T8-F4 回归）
         reply = f"行程总结：{itinerary.get('summary', '')}"
     else:
         reply = format_itinerary(itinerary)
     events.publish({"type": "agent_status", "data": {"agent": "planner", "status": "done"}})
+    events.publish({"type": "itinerary_update",
+                    "data": {"status": "generated", "itinerary": itinerary}})
     return {"phase": "answered", "itinerary": itinerary, "last_reply": reply}
