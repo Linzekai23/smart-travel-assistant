@@ -46,7 +46,10 @@ class AmapPoiService:
             return []
         if getattr(resp, "status_code", 200) != 200:
             return []
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, TypeError):
+            return []  # 200 但非 JSON（HTML 网关页/代理页）→ 降级 []
         if not isinstance(data, dict) or data.get("status") != "1":
             return []
         out: list[dict] = []
@@ -58,20 +61,26 @@ class AmapPoiService:
             base = BRANCH_SUFFIX_RE.sub("", name)
             if not name or base in seen:
                 continue  # 同一连锁分店只留第一条
-            seen.add(base)
-            loc = str(p.get("location") or "")
-            if "," not in loc:
-                continue
-            lng, lat = loc.split(",", 1)
-            photos = p.get("photos") or []
-            out.append({
-                "poi_id": f"amap-{p.get('id')}",
-                "name": name, "city": city, "category": category,
-                "lat": float(lat), "lng": float(lng),
-                "address": str(p.get("address") or "").strip() or None,
-                "tel": str(p.get("tel") or "").strip() or None,
-                "photo_url": photos[0].get("url") if photos else None,
-            })
+            try:
+                loc = str(p.get("location") or "")
+                if "," not in loc:
+                    continue
+                lng, lat = loc.split(",", 1)
+                lat_f = float(lat)
+                lng_f = float(lng)
+                photos = p.get("photos") or []
+                out.append({
+                    "poi_id": f"amap-{p.get('id')}",
+                    "name": name, "city": city, "category": category,
+                    "lat": lat_f, "lng": lng_f,
+                    "address": str(p.get("address") or "").strip() or None,
+                    "tel": str(p.get("tel") or "").strip() or None,
+                    "photo_url": (photos[0].get("url")
+                                  if photos and isinstance(photos[0], dict) else None),
+                })
+                seen.add(base)  # 解析成功才占去重位（坏坐标不毒化去重链）
+            except (ValueError, TypeError, AttributeError, KeyError):
+                continue  # 坏条目跳过，好条目保留（不整轮失败）
             if len(out) >= 10:
                 break
         return out

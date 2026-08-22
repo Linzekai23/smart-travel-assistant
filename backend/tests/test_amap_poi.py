@@ -23,23 +23,27 @@ POIS_JSON = {
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code: int = 200) -> None:
+    def __init__(self, payload, status_code: int = 200, json_error=None) -> None:
         self._payload = payload
         self.status_code = status_code
+        self._json_error = json_error
 
     def json(self):
+        if self._json_error is not None:
+            raise self._json_error
         return self._payload
 
 
 class FakeHttp:
-    def __init__(self, payload=POIS_JSON, status: int = 200) -> None:
+    def __init__(self, payload=POIS_JSON, status: int = 200, json_error=None) -> None:
         self._payload = payload
         self.status = status
+        self._json_error = json_error
         self.calls: list[str] = []
 
     def __call__(self, url, **kwargs):
         self.calls.append(url)
-        return FakeResponse(self._payload, self.status)
+        return FakeResponse(self._payload, self.status, self._json_error)
 
 
 @pytest.fixture(autouse=True)
@@ -113,3 +117,46 @@ def test_dedup_drops_second_branch(tmp_path):
     svc = AmapPoiService(http_get=http)
     out = svc.search_restaurants("成都")
     assert [i["name"] for i in out] == ["马旺子·川小馆(太古里店)"]
+
+
+def test_search_tolerates_non_json_payload(tmp_path):
+    """200 但返回非 JSON（HTML 网关页/代理页）→ 返回 [] 而非抛异常。"""
+    http = FakeHttp(json_error=ValueError("Expecting value: line 1 column 1"))
+    svc = AmapPoiService(http_get=http)
+    assert svc.search_restaurants("成都") == []
+
+
+def test_bad_coord_first_does_not_poison_dedup(tmp_path):
+    """首条分店坐标坏（非数值，跳过）→ 不毒化去重链，同链第二条仍保留。"""
+    payload = {
+        "status": "1",
+        "pois": [
+            {"id": "X1", "name": "观锦餐厅(天府新谷店)", "type": "餐饮服务;中餐厅",
+             "location": "abc,def", "address": "x", "tel": "", "photos": []},
+            {"id": "X2", "name": "观锦餐厅(春熙路店)", "type": "餐饮服务;中餐厅",
+             "location": "104.08,30.65", "address": "春熙路", "tel": "", "photos": []},
+        ],
+    }
+    http = FakeHttp(payload=payload)
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_restaurants("成都")
+    assert [i["name"] for i in out] == ["观锦餐厅(春熙路店)"]
+    assert out[0]["lat"] == 30.65 and out[0]["lng"] == 104.08
+
+
+def test_search_tolerates_non_dict_photos(tmp_path):
+    """photos 元素非 dict → photo_url 为 None，条目不丢弃（不整轮失败）。"""
+    payload = {
+        "status": "1",
+        "pois": [
+            {"id": "B0FFH1", "name": "马旺子·川小馆(太古里店)", "type": "餐饮服务;中餐厅",
+             "location": "104.0825,30.6512", "address": "中纱帽街8号",
+             "tel": "028-88888888", "photos": ["https://a.amap.com/p1.jpg"]},
+        ],
+    }
+    http = FakeHttp(payload=payload)
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_restaurants("成都")
+    assert len(out) == 1
+    assert out[0]["name"] == "马旺子·川小馆(太古里店)"
+    assert out[0]["photo_url"] is None
