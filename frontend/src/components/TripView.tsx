@@ -7,7 +7,6 @@ import {
   CloudOutlined,
   EnvironmentOutlined,
   HomeOutlined,
-  PhoneOutlined,
 } from "@ant-design/icons";
 import AttractionImage from "./AttractionImage";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
@@ -200,20 +199,12 @@ export default function TripView({ trip }: Props) {
                       {it.time_reason && <span>（{it.time_reason}）</span>}
                     </div>
                   )}
-                  {(it.address || it.tel) && (
+                  {it.address && (
                     <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
-                      {it.address && (
-                        <span>
-                          <EnvironmentOutlined className="mr-0.5 text-brand" />
-                          {it.address}
-                        </span>
-                      )}
-                      {it.tel && (
-                        <span>
-                          <PhoneOutlined className="mr-0.5 text-brand" />
-                          {it.tel}
-                        </span>
-                      )}
+                      <span>
+                        <EnvironmentOutlined className="mr-0.5 text-brand" />
+                        {it.address}
+                      </span>
                     </div>
                   )}
                   {it.detail && (
@@ -244,20 +235,12 @@ export default function TripView({ trip }: Props) {
                     <Tag>{`第${a.days.join("、")}天`}</Tag>
                   ) : null}
                 </div>
-                {(a.address || a.tel) && (
+                {a.address && (
                   <div className="mt-1 flex flex-wrap gap-x-3 pl-6 text-xs text-slate-500">
-                    {a.address && (
-                      <span>
-                        <EnvironmentOutlined className="mr-0.5 text-brand" />
-                        {a.address}
-                      </span>
-                    )}
-                    {a.tel && (
-                      <span>
-                        <PhoneOutlined className="mr-0.5 text-brand" />
-                        {a.tel}
-                      </span>
-                    )}
+                    <span>
+                      <EnvironmentOutlined className="mr-0.5 text-brand" />
+                      {a.address}
+                    </span>
                   </div>
                 )}
                 {a.photo_url && (
