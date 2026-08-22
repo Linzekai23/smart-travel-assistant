@@ -136,3 +136,39 @@ def test_enrich_does_not_mutate_input():
 def test_enrich_days_none_passthrough():
     out = enrich_itinerary({"days": None, "summary": "x", "warnings": []}, CANDIDATES)
     assert out["days"] is None  # days: None 透传（planner days-None 降级分支依赖此语义）
+
+
+AMAP_CANDIDATES = [
+    {"poi_id": "amap-B0FFH1", "name": "马旺子·川小馆(太古里店)", "city": "成都",
+     "category": "restaurant", "lat": 30.6512, "lng": 104.0825,
+     "address": "中纱帽街8号", "tel": "028-88888888", "photo_url": "https://a.amap.com/p1.jpg"},
+    {"poi_id": "amap-B0FFH9", "name": "世外桃源酒店", "city": "成都",
+     "category": "hotel", "lat": 30.66, "lng": 104.09,
+     "address": None, "tel": None, "photo_url": None},
+]
+
+
+def test_enrich_attaches_amap_restaurant_fields():
+    """引用 amap- poi_id 的餐厅条目附加真实商家字段（地址/电话/照片）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "马旺子·川小馆(太古里店)", "poi_id": "amap-B0FFH1",
+                               "note": "午餐", "detail": "招牌：川菜"}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, AMAP_CANDIDATES)["days"][0]["items"][0]
+    assert item["category"] == "restaurant"
+    assert item["address"] == "中纱帽街8号"
+    assert item["tel"] == "028-88888888"
+    assert item["photo_url"] == "https://a.amap.com/p1.jpg"
+    assert item["lat"] == 30.6512 and item["lng"] == 104.0825
+
+
+def test_enrich_omits_none_amap_fields():
+    """候选缺地址/电话/照片（None）时条目不附加这些字段。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "世外桃源酒店", "poi_id": "amap-B0FFH9",
+                               "note": ""}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, AMAP_CANDIDATES)["days"][0]["items"][0]
+    assert item["category"] == "hotel"
+    assert "address" not in item and "tel" not in item and "photo_url" not in item
+    assert item["lat"] == 30.66 and item["lng"] == 104.09
