@@ -1,1 +1,7 @@
 @import "tailwindcss";
+
+@theme {
+  /* 与 src/theme.ts 的 BRAND 保持一致 */
+  --color-brand: #0d9488;
+  --color-brand-strong: #0f766e;
+}

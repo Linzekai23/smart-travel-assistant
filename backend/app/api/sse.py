@@ -1,22 +1,12 @@
-import asyncio
-import json
-import time
-
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
+
+from app import events
 
 router = APIRouter()
 
 
 @router.get("/api/events")
-async def events():
-    async def gen():
-        try:
-            while True:
-                payload = {"type": "ping", "ts": time.time()}
-                yield f"event: ping\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+async def events_endpoint():
+    """SSE 事件流：ping 心跳 + agent_status/itinerary_update 事件。"""
+    return StreamingResponse(events.event_stream(), media_type="text/event-stream")

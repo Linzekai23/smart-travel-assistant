@@ -1,0 +1,7 @@
+{"name": "故宫博物院", "province": "北京", "city": "北京", "category": "attraction", "lat": 39.9163, "lng": 116.3972, "rating": 4.8, "price_tier": 2, "description": "明清两代皇宫，世界最大木结构建筑群，需提前预约。", "tags": ["历史", "预约"]}
+{"name": "八达岭长城", "province": "北京", "city": "北京", "category": "attraction", "lat": 40.3601, "lng": 116.0124, "rating": 4.7, "price_tier": 2, "description": "万里长城最著名段落，好汉坡。", "tags": ["历史", "徒步"]}
+{"name": "广州塔", "province": "广东", "city": "广州", "category": "attraction", "lat": 23.1066, "lng": 113.3245, "rating": 4.6, "price_tier": 3, "description": "珠江畔地标，夜景灯光秀。", "tags": ["夜景", "地标"]}
+{"name": "白云山", "province": "广东", "city": "广州", "category": "attraction", "lat": 23.1800, "lng": 113.2900, "rating": 4.4, "price_tier": 1, "description": "羊城第一秀，城市绿肺。", "tags": ["自然", "登山"]}
+{"name": "丹霞山", "province": "广东", "city": "韶关", "category": "attraction", "lat": 25.0200, "lng": 113.7500, "rating": 4.7, "price_tier": 2, "description": "世界自然遗产，丹霞地貌命名地。", "tags": ["自然", "世界遗产"]}
+{"name": "世界之窗", "province": "广东", "city": "深圳", "category": "attraction", "lat": 22.5340, "lng": 113.9740, "rating": 4.3, "price_tier": 3, "description": "浓缩世界景观的主题公园。", "tags": ["主题公园", "亲子"]}
+{"name": "宽窄巷子", "province": "四川", "city": "成都", "category": "attraction", "lat": 30.67, "lng": 104.06, "rating": 4.6, "price_tier": 1, "description": "老成都街区，小吃与茶馆集中。", "tags": ["老街", "小吃"]}
