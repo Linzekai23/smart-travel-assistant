@@ -418,3 +418,36 @@ def test_planner_amap_failure_falls_back_to_examples(monkeypatch):
     planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     prompt = fake.calls[0][-1]["content"]
     assert "候选餐厅" not in prompt and "候选酒店" not in prompt
+
+
+def test_planner_amap_context_contains_poi_id(monkeypatch):
+    """餐厅/酒店候选行含 poi_id（LLM 必须看到 id 才能引用）。"""
+    amap = FakeAmap(restaurants=[AMAP_RESTAURANT], hotels=[AMAP_HOTEL])
+    monkeypatch.setattr(planner, "_amap_service", amap)
+    fake = _fake()
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    prompt = fake.calls[0][-1]["content"]
+    assert "poi_id: amap-B0FFH1" in prompt
+    assert "poi_id: amap-B0FFH9" in prompt
+
+
+def test_planner_restaurant_only_reference_still_injects_attraction(monkeypatch):
+    """只引用餐厅/酒店 id（景点全标示例）→ 零引用兜底仍触发：重试 + 注入景点。"""
+    amap = FakeAmap(restaurants=[AMAP_RESTAURANT], hotels=[AMAP_HOTEL])
+    monkeypatch.setattr(planner, "_amap_service", amap)
+    rest_only = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                           "items": [{"name": "马旺子·川小馆(太古里店)", "poi_id": "amap-B0FFH1",
+                                      "note": "午餐"},
+                                     {"name": "广州塔（示例）", "note": "夜景"}]}],
+                 "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": rest_only,
+        "上一版行程没有引用": rest_only,
+        "景点补全": {"items": []}})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    items = out["itinerary"]["days"][0]["items"]
+    assert items[0]["poi_id"] == "guangzhou-001"   # 注入的景点（零引用兜底触发）
+    assert items[0]["name"] == "广州塔"
+    assert items[1]["poi_id"] == "amap-B0FFH1"     # 餐厅条目保留（放行）
+    # 行程 + 纠正重试：示例景点经 enrich 名称匹配获 poi_id（非语料外），无需补全调用
+    assert len(fake.calls) == 2

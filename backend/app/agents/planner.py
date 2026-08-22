@@ -64,12 +64,15 @@ def build_candidate_context(candidates: list[dict]) -> str:
             continue
         lines.append(label)
         for p in group:
-            bits = [p["name"]]
+            bits = []
+            pid = p.get("poi_id")
+            if pid:
+                bits.append(f"poi_id: {pid}")
             if p.get("address"):
                 bits.append(f"地址：{p['address']}")
             if p.get("tel"):
                 bits.append(f"电话：{p['tel']}")
-            lines.append(f"- {'，'.join(bits)}")
+            lines.append(f"- {p['name']}" + (f"（{'，'.join(bits)}）" if bits else ""))
     return "\n".join(lines) if lines else "（无候选景点）"
 
 
@@ -188,10 +191,12 @@ def _clean_itinerary(itinerary: dict, candidate_ids: set) -> None:
         day["items"] = kept
 
 
-def _has_candidate_reference(itinerary: dict) -> bool:
-    """行程中是否存在至少一个引用候选 poi_id 的条目（无引用 = 地图空图）。"""
+def _has_candidate_reference(itinerary: dict, attraction_ids: set) -> bool:
+    """行程中是否存在至少一个引用候选景点 poi_id 的条目。
+    仅统计景点引用：餐厅/酒店（amap- 前缀）引用不算——零引用重试/注入
+    兜底保证"每天至少 1-2 个候选景点"的硬规则不被餐饮引用蒙混。"""
     return any(
-        item.get("poi_id") is not None
+        item.get("poi_id") in attraction_ids
         for day in itinerary.get("days") or []
         for item in day.get("items", [])
     )
@@ -252,6 +257,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         )},
     ]
     candidate_ids = {p.get("poi_id") for p in candidates if p.get("poi_id")}
+    attraction_ids = {p.get("poi_id") for p in candidates
+                      if p.get("category") == "attraction" and p.get("poi_id")}
     itinerary = {}
     for attempt in range(2):
         try:
@@ -260,7 +267,7 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             itinerary = {}
             break  # LLM 异常走既有降级路径（days-None 分支）
         _clean_itinerary(itinerary, candidate_ids)
-        if not itinerary.get("days") or _has_candidate_reference(itinerary):
+        if not itinerary.get("days") or _has_candidate_reference(itinerary, attraction_ids):
             break
         # 零引用兜底：追加纠正指令重试一次（无引用 = 地图空图，M5 冒烟实证 LLM 会
         # 把所有条目标（示例）规避引用规则）
@@ -274,13 +281,15 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
     # 兜底：两轮 LLM 均零引用候选 → 确定性逐天注入不同的候选景点（每天一个
     # 主要景点，地图多点、detail 由 enrich 附候选 description；M5 冒烟实证真实
     # LLM 会连续两轮规避引用规则，纯提示词级重试不足以保证标记）
-    if itinerary.get("days") and not _has_candidate_reference(itinerary) and candidates:
+    if itinerary.get("days") and not _has_candidate_reference(itinerary, attraction_ids) and candidates:
         used: set = set()
         _slots = [("上午 8:00-10:00 前往", "清晨游客较少"),
                   ("下午 14:00-16:00 前往", "午后光线好、游客相对少"),
                   ("傍晚 17:00 后前往", "避开正午人流，夜景更美")]
         for day in itinerary["days"]:
-            cand = next((c for c in candidates if c.get("poi_id") and c["poi_id"] not in used), None)
+            cand = next((c for c in candidates
+                         if c.get("category") == "attraction"
+                         and c.get("poi_id") and c["poi_id"] not in used), None)
             if cand is None:
                 break
             used.add(cand["poi_id"])
