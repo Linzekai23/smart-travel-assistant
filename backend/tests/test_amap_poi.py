@@ -1,9 +1,24 @@
 """高德 POI 检索：解析/过滤/去重 + 降级（全 mock，无网络）。"""
+import io
 import urllib.parse
 
 import pytest
 
-from app.api.amap_poi import AmapPoiService
+from app.api.amap_poi import (
+    MIN_PHOTO_SCORE,
+    AmapPoiService,
+    _pick_best_photo,
+    _score_photo,
+)
+
+
+def _jpeg(rgb: tuple[int, int, int]) -> bytes:
+    """内存生成纯色 JPEG（照片评分测试用，无网络）。"""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), rgb).save(buf, "JPEG")
+    return buf.getvalue()
 
 POIS_JSON = {
     "status": "1", "count": "20",
@@ -72,12 +87,74 @@ def test_restaurants_parse_and_filter(tmp_path):
 def test_hotels_keep_only_hotel_main_type(tmp_path):
     """美食结果里的住宿服务被过滤；酒店查询只保留住宿服务主分类。"""
     http = FakeHttp()
-    svc = AmapPoiService(http_get=http)
+    svc = AmapPoiService(http_get=http,
+                         photo_picker=lambda urls: "https://a.amap.com/h1.jpg",
+                         hotel_fallback=lambda city: None)
     out = svc.search_hotels("成都")
     assert len(out) == 1
     assert out[0]["name"] == "云隐小院"              # 住宿服务被保留
     assert out[0]["category"] == "hotel"
     assert "types=100000" in http.calls[0]
+
+
+# ---------- 酒店照片择优（阳光指数） ----------
+
+def test_score_photo_ranks_sunny_above_dark():
+    """明亮暖色高分，昏黄/纯暗低分；非图片数据给最低分。"""
+    sunny = _score_photo(_jpeg((255, 205, 120)))
+    dingy = _score_photo(_jpeg((173, 169, 146)))
+    dark = _score_photo(_jpeg((40, 40, 40)))
+    assert sunny >= MIN_PHOTO_SCORE > dingy > dark
+    assert _score_photo(b"not an image") < 0
+
+
+def test_pick_best_photo_chooses_sunniest():
+    """多张照片取阳光指数最高的一张（不取第一张）。"""
+    fake = {"https://a.amap.com/dark.jpg": _jpeg((40, 40, 40)),
+            "https://a.amap.com/sun.jpg": _jpeg((255, 205, 120))}
+    assert _pick_best_photo(["https://a.amap.com/dark.jpg",
+                             "https://a.amap.com/sun.jpg"], fetch=fake.get) == \
+        "https://a.amap.com/sun.jpg"
+
+
+def test_pick_best_photo_all_dark_returns_none():
+    """全部照片低于阈值 → None（触发通用大堂图兜底）。"""
+    fake = {"https://a.amap.com/dark.jpg": _jpeg((40, 40, 40))}
+    assert _pick_best_photo(["https://a.amap.com/dark.jpg"], fetch=fake.get) is None
+
+
+def test_pick_best_photo_fetch_failure_skipped():
+    """下载失败的照片跳过，不影响其余照片择优。"""
+    def fetch(url):
+        return None if url == "bad" else _jpeg((255, 205, 120))
+
+    assert _pick_best_photo(["bad", "good"], fetch=fetch) == "good"
+
+
+def test_pick_best_photo_empty_urls():
+    assert _pick_best_photo([], fetch=lambda u: None) is None
+
+
+def test_hotel_photo_picked_and_no_fallback(tmp_path):
+    """酒店照片择优命中 → 用真实照片，不调通用兜底。"""
+    calls = []
+    svc = AmapPoiService(http_get=FakeHttp(),
+                         photo_picker=lambda urls: "https://a.amap.com/h1.jpg",
+                         hotel_fallback=lambda city: calls.append(city) or "https://bing/lobby.jpg")
+    out = svc.search_hotels("成都")
+    assert out[0]["photo_url"] == "https://a.amap.com/h1.jpg"
+    assert calls == []
+
+
+def test_hotel_dark_photos_fall_back_to_lobby(tmp_path):
+    """酒店照片全太暗 → photo_url 用通用大堂图，兜底收到城市名。"""
+    calls = []
+    svc = AmapPoiService(http_get=FakeHttp(),
+                         photo_picker=lambda urls: None,
+                         hotel_fallback=lambda city: calls.append(city) or "https://bing/lobby.jpg")
+    out = svc.search_hotels("成都")
+    assert out[0]["photo_url"] == "https://bing/lobby.jpg"
+    assert calls == ["成都"]
 
 
 def test_empty_tel_and_photos(tmp_path):
