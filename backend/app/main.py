@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app import db
 from app.api.attraction_image import router as attraction_image_router
+from app.api.amap_poi import router as amap_poi_router
 from app.api.chat import router as chat_router
 from app.api.sse import router as sse_router
 from app.llm.deepseek import get_provider
@@ -36,6 +37,7 @@ app.state.llm_configured = False
 app.include_router(sse_router)
 app.include_router(chat_router)
 app.include_router(attraction_image_router)
+app.include_router(amap_poi_router)
 
 
 @app.get("/api/health")
