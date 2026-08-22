@@ -53,13 +53,25 @@ def test_enrich_fills_detail_from_candidate_description():
 
 
 def test_enrich_keeps_llm_detail_over_candidate_description():
-    """条目已有 detail 时保留 LLM 原文，不被候选 description 覆盖。"""
+    """条目已有够长的 detail（≥40 字）时保留 LLM 原文，不被候选 description 覆盖。"""
+    llm_detail = ("广州塔高600米，昵称小蛮腰，登顶可俯瞰珠江新城全景，"
+                  "夜晚灯光秀不容错过，塔下有花城广场音乐喷泉。")
     it = {"days": [{"day": 1, "title": "x", "weather_note": "",
                     "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": "",
-                               "detail": "LLM 写的详细介绍"}]}],
+                               "detail": llm_detail}]}],
           "summary": "", "warnings": []}
     item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
-    assert item["detail"] == "LLM 写的详细介绍"
+    assert item["detail"] == llm_detail
+
+
+def test_enrich_replaces_short_detail_with_candidate_description():
+    """LLM 写的短 detail（<40 字套话）被候选 description 替换（具体介绍）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": "",
+                               "detail": "值得一去"}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
+    assert item["detail"] == "珠江畔地标。"
 
 
 def test_enrich_tolerates_missing_candidate_fields():
