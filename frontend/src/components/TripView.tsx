@@ -5,7 +5,9 @@ import {
   BulbOutlined,
   ClockCircleOutlined,
   CloudOutlined,
+  EnvironmentOutlined,
   HomeOutlined,
+  PhoneOutlined,
 } from "@ant-design/icons";
 import AttractionImage from "./AttractionImage";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
@@ -23,6 +25,10 @@ export interface TripItem {
   lng?: number;
   category?: string;
   city?: string;
+  // 高德真实商家（餐厅/酒店）：地址/电话/照片
+  address?: string;
+  tel?: string;
+  photo_url?: string;
 }
 
 export interface TripDay {
@@ -81,7 +87,7 @@ export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
 
-  // 只有带坐标的景点条目上地图（餐厅/酒店为（示例）条目，语料无坐标）
+  // 带坐标的条目上地图（景点 + 高德真实餐厅/酒店）
   const geoDays: DayGeo[] = useMemo(
     () =>
       days.map((d) => ({
@@ -99,6 +105,8 @@ export default function TripView({ trip }: Props) {
             suggested_time: it.suggested_time,
             time_reason: it.time_reason,
             note: it.note,
+            category: it.category,
+            address: it.address,
           })),
       })),
     [days],
@@ -164,13 +172,29 @@ export default function TripView({ trip }: Props) {
                       {it.time_reason && <span>（{it.time_reason}）</span>}
                     </div>
                   )}
+                  {(it.address || it.tel) && (
+                    <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
+                      {it.address && (
+                        <span>
+                          <EnvironmentOutlined className="mr-0.5 text-brand" />
+                          {it.address}
+                        </span>
+                      )}
+                      {it.tel && (
+                        <span>
+                          <PhoneOutlined className="mr-0.5 text-brand" />
+                          {it.tel}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {it.detail && (
                     <p className="mt-1 text-sm leading-relaxed text-slate-600">
                       {it.detail}
                     </p>
                   )}
                   {(it.poi_id || it.category === "attraction") && (
-                    <AttractionImage name={it.name} city={it.city} />
+                    <AttractionImage name={it.name} city={it.city} photoUrl={it.photo_url} />
                   )}
                 </div>
               ),
@@ -246,6 +270,9 @@ export default function TripView({ trip }: Props) {
         </Card>
       ) : null}
 
+      <p className="text-center text-xs text-slate-400">
+        餐厅/酒店数据来自高德地图，营业信息可能变动
+      </p>
     </div>
   );
 }

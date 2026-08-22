@@ -10,6 +10,8 @@ export interface MapPoint {
   suggested_time?: string;
   time_reason?: string;
   note?: string;
+  category?: string;
+  address?: string;
 }
 
 export interface DayGeo {
@@ -22,11 +24,19 @@ export interface DayGeo {
 const TILE_URL =
   "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}";
 
+// 三类标记配色：景点=品牌色，餐厅=橙，酒店=蓝（真实商家接入后地图区分）
+const CATEGORY_COLORS: Record<string, string> = {
+  attraction: BRAND,
+  restaurant: "#f59e0b",
+  hotel: "#3b82f6",
+};
+
 // 自定义 divIcon：bundler 下 Leaflet 默认 marker 图标资源会 404，圆形编号标记规避
-function makeIcon(day: number, index: number) {
+function makeIcon(day: number, index: number, category?: string) {
+  const bg = (category && CATEGORY_COLORS[category]) || BRAND;
   return L.divIcon({
     className: "",
-    html: `<div style="background:${BRAND};color:#fff;border-radius:9999px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${day}-${index + 1}</div>`,
+    html: `<div style="background:${bg};color:#fff;border-radius:9999px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${day}-${index + 1}</div>`,
     iconSize: [20, 20],
     iconAnchor: [10, 10],
   });
@@ -66,10 +76,15 @@ export default function ItineraryMap({ days, activeDay }: Props) {
         <FitBounds points={points} />
         {visibleDays.map((d) =>
           d.points.map((p, i) => (
-            <Marker key={`${d.day}-${i}`} position={[p.lat, p.lng]} icon={makeIcon(d.day, i)}>
+            <Marker
+              key={`${d.day}-${i}`}
+              position={[p.lat, p.lng]}
+              icon={makeIcon(d.day, i, p.category)}
+            >
               <Popup>
                 <div className="text-xs">
                   <p className="font-semibold">{p.name}</p>
+                  {p.address && <p>{p.address}</p>}
                   {p.suggested_time && (
                     <p>
                       建议{p.suggested_time}
