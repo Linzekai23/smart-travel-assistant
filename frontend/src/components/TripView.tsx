@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Card, Collapse, Table, Tabs, Tag, Timeline } from "antd";
+import { Card, Table, Tabs, Tag, Timeline } from "antd";
 import type { TableProps } from "antd";
 import { BulbOutlined, CloudOutlined } from "@ant-design/icons";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
@@ -50,10 +50,9 @@ const budgetColumns: TableProps<BudgetRow>["columns"] = [
 
 interface Props {
   trip: Trip;
-  reply: string;
 }
 
-export default function TripView({ trip, reply }: Props) {
+export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
 
@@ -177,24 +176,6 @@ export default function TripView({ trip, reply }: Props) {
         </Card>
       ) : null}
 
-      {/* 完整文本回复折叠（仅回复非空时渲染） */}
-      {reply ? (
-        <Collapse
-          ghost
-          size="small"
-          items={[
-            {
-              key: "reply",
-              label: "查看完整文本回复",
-              children: (
-                <div className="whitespace-pre-wrap text-sm text-slate-700">
-                  {reply}
-                </div>
-              ),
-            },
-          ]}
-        />
-      ) : null}
     </div>
   );
 }

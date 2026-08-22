@@ -95,11 +95,6 @@ function App() {
     setTrip(null);
   };
 
-  // 最新一条 assistant 消息的内容作为 TripView 的完整文本回复
-  const lastAssistantIdx = messages.map((m) => m.role).lastIndexOf("assistant");
-  const lastReply =
-    lastAssistantIdx >= 0 ? messages[lastAssistantIdx].content : "";
-
   return (
     <div className="flex h-dvh flex-col bg-slate-50">
       <TopBar hasSession={!!sessionId} onReset={handleReset} />
@@ -109,7 +104,7 @@ function App() {
         </aside>
         <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">
           {trip ? (
-            <TripView trip={trip} reply={lastReply} />
+            <TripView trip={trip} />
           ) : (
             <EmptyState onTry={handleSend} />
           )}
