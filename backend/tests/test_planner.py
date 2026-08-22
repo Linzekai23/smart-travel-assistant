@@ -19,6 +19,10 @@ ITINERARY = {
                          "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳、江风凉爽",
                          "note": "夜景"},
                         {"name": "点都德（示例）", "note": "午餐"}]}],
+    "accommodation": [{"name": "锦江宾馆（示例）", "days": [1, 2],
+                       "location_note": "锦江区，近春熙路",
+                       "commute_note": "到当日景点约 15-30 分钟车程",
+                       "price_note": "中档，符合预算"}],
     "summary": "OK", "warnings": [],
 }
 
@@ -129,6 +133,15 @@ def test_planner_days_null_tolerated():
 def test_format_itinerary_shape():
     text = planner.format_itinerary(ITINERARY)
     assert "第 1 天" in text and "广州塔" in text and "## " in text
+
+
+def test_format_itinerary_includes_accommodation():
+    text = planner.format_itinerary(ITINERARY)
+    assert "🏨" in text
+    assert "锦江宾馆（示例）" in text and "第1天" in text and "第2天" in text
+    assert "锦江区，近春熙路" in text          # 位置理由
+    assert "到当日景点约 15-30 分钟车程" in text  # 通勤理由
+    assert "中档，符合预算" in text             # 价格理由
 
 
 def test_planner_enriches_itinerary_with_candidate_coords():

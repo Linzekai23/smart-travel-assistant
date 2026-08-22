@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
 import { Card, Table, Tabs, Tag, Timeline } from "antd";
 import type { TableProps } from "antd";
-import { BulbOutlined, ClockCircleOutlined, CloudOutlined } from "@ant-design/icons";
+import {
+  BulbOutlined,
+  ClockCircleOutlined,
+  CloudOutlined,
+  HomeOutlined,
+} from "@ant-design/icons";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
 
 export interface TripItem {
@@ -23,8 +28,21 @@ export interface TripDay {
   items: TripItem[];
 }
 
+export interface Accommodation {
+  name: string;
+  days?: number[];
+  location_note?: string;
+  commute_note?: string;
+  price_note?: string;
+}
+
 export interface Trip {
-  itinerary: { days: TripDay[]; summary?: string; warnings?: string[] };
+  itinerary: {
+    days: TripDay[];
+    summary?: string;
+    warnings?: string[];
+    accommodation?: Accommodation[];
+  };
   budget_plan: {
     items?: { category: string; amount: number; note?: string }[];
     total?: number | null;
@@ -147,6 +165,32 @@ export default function TripView({ trip }: Props) {
           />
         </Card>
       ))}
+
+      {/* 住宿推荐（行程级 1-2 家：基于景点位置与通勤集中安排，跨区远才换宿） */}
+      {trip.itinerary.accommodation?.length ? (
+        <Card title="住宿推荐">
+          <ul className="space-y-3">
+            {trip.itinerary.accommodation.map((a, i) => (
+              <li key={i} className="text-sm">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <HomeOutlined className="text-brand" />
+                  <span className="font-medium text-slate-800">{a.name}</span>
+                  {a.days?.length ? (
+                    <Tag>{`第${a.days.join("、")}天`}</Tag>
+                  ) : null}
+                </div>
+                {(a.location_note || a.commute_note || a.price_note) && (
+                  <div className="mt-1 space-y-0.5 pl-6 text-xs text-slate-500">
+                    {a.location_note && <div>位置：{a.location_note}</div>}
+                    {a.commute_note && <div>通勤：{a.commute_note}</div>}
+                    {a.price_note && <div>价格：{a.price_note}</div>}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {/* 预算卡片 */}
       {budget.items?.length ? (

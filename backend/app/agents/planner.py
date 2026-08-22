@@ -28,7 +28,8 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
     }
   ],
   "summary": "整体行程总结，50 字以内",
-  "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"]
+  "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"],
+  "accommodation": [{"name": "酒店名（示例）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算"}]
 }
 规则：
 - 每天 3-5 项，按游览顺序排列（建议时段由早到晚）；餐饮穿插在景点之间，每天 1-2 餐
@@ -36,7 +37,7 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
-- 住宿按预算约束的每晚住宿预算选档位
+- 住宿推荐集中安排：优先选景点集中的区域住一家、覆盖整个行程（days 列全程天数），通勤方便；仅当某天景点与主住宿区距离确实较远（如跨市郊景区）才换第 2 家并在 commute_note 说明原因；住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
 - 天数以 duration_days 为准，不要多排"""
@@ -73,6 +74,17 @@ def format_itinerary(itinerary: dict) -> str:
                 bits.append(note_text)
             lines.append(f"- **{name}**" + (f"（{'；'.join(bits)}）" if bits else ""))
         lines.append("")
+    for acc in itinerary.get("accommodation") or []:
+        if not lines or lines[-1] != "":
+            lines.append("")
+        days_txt = "、".join(f"第{d}天" for d in (acc.get("days") or []))
+        bits = [f"住宿：{acc.get('name', '')}"]
+        if days_txt:
+            bits.append(days_txt)
+        for key in ("location_note", "commute_note", "price_note"):
+            if acc.get(key):
+                bits.append(acc[key])
+        lines.append("- 🏨 " + "；".join(bits))
     if itinerary.get("summary"):
         lines.append(f"**行程总结**：{itinerary['summary']}")
     for w in itinerary.get("warnings", []):
