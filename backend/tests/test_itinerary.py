@@ -172,3 +172,51 @@ def test_enrich_omits_none_amap_fields():
     assert item["category"] == "hotel"
     assert "address" not in item and "tel" not in item and "photo_url" not in item
     assert item["lat"] == 30.66 and item["lng"] == 104.09
+
+
+def test_enrich_attaches_amap_hotel_fields():
+    """accommodation 条目引用 amap- poi_id → 富化附加地址/电话/照片/坐标。"""
+    cand = {"poi_id": "amap-B0FFH9", "name": "世外桃源酒店", "city": "广州",
+            "category": "hotel", "lat": 23.13, "lng": 113.31,
+            "address": "天河路1号", "tel": "020-12345678",
+            "photo_url": "https://a.amap.com/h.jpg"}
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+          "accommodation": [{"name": "世外桃源酒店", "poi_id": "amap-B0FFH9",
+                             "days": [1, 2], "location_note": "天河区",
+                             "detail": "大堂现代"}],
+          "summary": "", "warnings": []}
+    out = enrich_itinerary(it, [CANDIDATES[0], cand])
+    acc = out["accommodation"][0]
+    assert acc["category"] == "hotel"
+    assert acc["address"] == "天河路1号" and acc["tel"] == "020-12345678"
+    assert acc["photo_url"] == "https://a.amap.com/h.jpg"
+    assert acc["lat"] == 23.13 and acc["lng"] == 113.31
+    assert acc["location_note"] == "天河区" and acc["detail"] == "大堂现代"  # 原字段保留
+    assert acc["days"] == [1, 2]
+
+
+def test_enrich_keeps_accommodation_without_poi_id():
+    """accommodation 无 poi_id（示例酒店）→ 原样保留（不做名称兜底匹配）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+          "accommodation": [{"name": "锦江宾馆（示例）", "days": [1, 2],
+                             "location_note": "锦江区"}],
+          "summary": "", "warnings": []}
+    out = enrich_itinerary(it, CANDIDATES)
+    assert out["accommodation"] == [{"name": "锦江宾馆（示例）", "days": [1, 2],
+                                     "location_note": "锦江区"}]
+
+
+def test_enrich_omits_none_amap_hotel_fields():
+    """候选缺地址/电话/照片（None）时 accommodation 条目不附加这些字段。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+          "accommodation": [{"name": "世外桃源酒店", "poi_id": "amap-B0FFH9",
+                             "days": [1, 2], "location_note": "成都"}],
+          "summary": "", "warnings": []}
+    acc = enrich_itinerary(it, AMAP_CANDIDATES)["accommodation"][0]
+    assert acc["category"] == "hotel"
+    assert acc["lat"] == 30.66 and acc["lng"] == 104.09
+    assert "address" not in acc and "tel" not in acc and "photo_url" not in acc
+    assert acc["location_note"] == "成都" and acc["days"] == [1, 2]

@@ -45,6 +45,15 @@ export interface Accommodation {
   commute_note?: string;
   price_note?: string;
   detail?: string;
+  // 高德真实商家（酒店）：poi_id/地址/电话/照片 + 坐标（地图蓝点）
+  poi_id?: string;
+  category?: string;
+  city?: string;
+  lat?: number;
+  lng?: number;
+  address?: string;
+  tel?: string;
+  photo_url?: string;
 }
 
 export interface Trip {
@@ -87,29 +96,48 @@ export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
 
-  // 带坐标的条目上地图（景点 + 高德真实餐厅/酒店）
+  // 带坐标的条目上地图（景点 + 高德真实餐厅/酒店 + 富化的住宿蓝点）
   const geoDays: DayGeo[] = useMemo(
     () =>
-      days.map((d) => ({
-        day: d.day,
-        title: d.title,
-        points: (d.items ?? [])
+      days.map((d) => {
+        const hotelPoints = (trip.itinerary.accommodation ?? [])
           .filter(
-            (it): it is TripItem & { lat: number; lng: number } =>
-              typeof it.lat === "number" && typeof it.lng === "number",
+            (a): a is Accommodation & { lat: number; lng: number } =>
+              (a.days ?? []).includes(d.day) &&
+              typeof a.lat === "number" &&
+              typeof a.lng === "number",
           )
-          .map((it) => ({
-            name: it.name,
-            lat: it.lat,
-            lng: it.lng,
-            suggested_time: it.suggested_time,
-            time_reason: it.time_reason,
-            note: it.note,
-            category: it.category,
-            address: it.address,
-          })),
-      })),
-    [days],
+          .map((a) => ({
+            name: a.name,
+            lat: a.lat,
+            lng: a.lng,
+            category: "hotel",
+            address: a.address,
+          }));
+        return {
+          day: d.day,
+          title: d.title,
+          points: [
+            ...(d.items ?? [])
+              .filter(
+                (it): it is TripItem & { lat: number; lng: number } =>
+                  typeof it.lat === "number" && typeof it.lng === "number",
+              )
+              .map((it) => ({
+                name: it.name,
+                lat: it.lat,
+                lng: it.lng,
+                suggested_time: it.suggested_time,
+                time_reason: it.time_reason,
+                note: it.note,
+                category: it.category,
+                address: it.address,
+              })),
+            ...hotelPoints,
+          ],
+        };
+      }),
+    [days, trip.itinerary.accommodation],
   );
 
   const budget = trip.budget_plan ?? {};
@@ -216,6 +244,31 @@ export default function TripView({ trip }: Props) {
                     <Tag>{`第${a.days.join("、")}天`}</Tag>
                   ) : null}
                 </div>
+                {(a.address || a.tel) && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 pl-6 text-xs text-slate-500">
+                    {a.address && (
+                      <span>
+                        <EnvironmentOutlined className="mr-0.5 text-brand" />
+                        {a.address}
+                      </span>
+                    )}
+                    {a.tel && (
+                      <span>
+                        <PhoneOutlined className="mr-0.5 text-brand" />
+                        {a.tel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {a.photo_url && (
+                  <div className="pl-6">
+                    <AttractionImage
+                      name={a.name}
+                      city={a.city}
+                      photoUrl={a.photo_url}
+                    />
+                  </div>
+                )}
                 {(a.location_note ||
                   a.commute_note ||
                   a.price_note ||

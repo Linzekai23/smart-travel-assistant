@@ -23,6 +23,9 @@ def enrich_itinerary(itinerary: dict, candidates: list[dict]) -> dict:
     景点条目按 poi_id 命中候选，或名称包含匹配候选（LLM 不填 poi_id 时的兜底，
     保证所有景点都有坐标/介绍/图片）→ 附加坐标等字段（地图标记用）；
     完全未命中（示例餐饮/住宿、语料没有的编造景点）→ 原样保留。
+    行程级 accommodation 条目按 poi_id 命中候选时附加 lat/lng/name/category/
+    address/tel/photo_url（住宿卡片真实商家信息 + 地图酒店蓝点用），
+    未命中或字段为 None 则保持原样。
     非破坏性：返回新结构、不修改入参（测试 fake 常量共享嵌套 dict，原地改会串用例）。
     """
     if not itinerary.get("days"):
@@ -52,4 +55,19 @@ def enrich_itinerary(itinerary: dict, candidates: list[dict]) -> dict:
                 enriched["detail"] = cand["description"]
             items.append(enriched)
         days.append({**day, "items": items})
+    acc = itinerary.get("accommodation")
+    if acc:
+        enriched_acc = []
+        for a in acc:
+            cand = by_id.get(a.get("poi_id"))
+            if cand is None:
+                enriched_acc.append(dict(a))
+                continue
+            e = dict(a)
+            # address/tel/photo_url 为高德候选的真实商家字段（None 不附加）
+            for field in ("lat", "lng", "name", "category", "address", "tel", "photo_url"):
+                if cand.get(field) is not None:
+                    e[field] = cand[field]
+            enriched_acc.append(e)
+        return {**itinerary, "days": days, "accommodation": enriched_acc}
     return {**itinerary, "days": days}
