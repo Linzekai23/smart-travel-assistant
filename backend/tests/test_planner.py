@@ -15,8 +15,10 @@ CANDIDATES = [
 
 ITINERARY = {
     "days": [{"day": 1, "title": "广州地标", "weather_note": "晴 24°C",
-              "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": "夜景"},
-                        {"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+              "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                         "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳、江风凉爽",
+                         "note": "夜景"},
+                        {"name": "点都德（示例）", "note": "午餐"}]}],
     "summary": "OK", "warnings": [],
 }
 
@@ -92,7 +94,7 @@ def test_planner_filters_hallucinated_poi():
     """有 poi_id 但不在候选 → 编造景点丢弃；零引用兜底注入后仅剩 top 候选条目。"""
     hallucinated = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
-                  "items": [{"time": "09:00", "name": "编造的景点", "poi_id": "nope-999", "note": ""}]}],
+                  "items": [{"name": "编造的景点", "poi_id": "nope-999", "note": ""}]}],
         "summary": "x", "warnings": [],
     }
     fake = FakeProvider(json_responses={"行程规划JSON": hallucinated,
@@ -106,7 +108,7 @@ def test_planner_keeps_example_food_without_poi_id():
     """无 poi_id 的条目（LLM 生成的示例餐饮/住宿）保留（注入条目前置、示例条目仍在）。"""
     zero_ref = {
         "days": [{"day": 1, "title": "x", "weather_note": "晴",
-                  "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                  "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
         "summary": "x", "warnings": [],
     }
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
@@ -163,10 +165,12 @@ def test_planner_retries_once_when_zero_candidate_reference():
     """零引用（地图空图）→ 追加纠正指令重试一次，第二次引用候选 → 行程含引用。"""
     fake = FakeProvider(json_responses={
         "行程规划JSON": {"days": [{"day": 1, "title": "x", "weather_note": "晴",
-                                   "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                                   "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
                          "summary": "x", "warnings": []},
         "上一版行程没有引用": {"days": [{"day": 1, "title": "x", "weather_note": "晴",
-                                         "items": [{"time": "09:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+                                         "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                                                    "suggested_time": "建议上午 8:00-10:00 前往",
+                                                    "time_reason": "清晨人少", "note": ""}]}],
                                "summary": "x", "warnings": []},
     })
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
@@ -180,7 +184,7 @@ def test_planner_retries_once_when_zero_candidate_reference():
 def test_planner_zero_reference_twice_still_terminates():
     """两轮都零引用 → 不再重试，注入 top 候选兜底，正常格式化（不无限循环）。"""
     zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
-                          "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                          "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
                                         "上一版行程没有引用": zero_ref})
@@ -204,7 +208,7 @@ def test_planner_prompt_requires_candidate_reference():
 def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
     """两轮 LLM 零引用 → 确定性注入 top-1 候选（带坐标，地图必有点）。"""
     zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
-                          "items": [{"time": "12:30", "name": "点都德（示例）", "note": "午餐"}]}],
+                          "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
                                         "上一版行程没有引用": zero_ref})
@@ -214,4 +218,5 @@ def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
     assert item["poi_id"] == "guangzhou-001"  # CANDIDATES[0]（广州塔）
     assert item["name"] == "广州塔"
     assert item["note"] == "推荐安排"
+    assert item["suggested_time"] == "上午 8:00-10:00 前往"  # 注入兜底带建议时段
     assert item["lat"] == 23.1066  # 富化正常

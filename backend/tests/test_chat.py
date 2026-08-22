@@ -33,8 +33,9 @@ class ReplanFakeProvider(FakeProvider):
             base = self.json_responses["行程规划JSON"]
             return {
                 "days": [{"day": 1, "title": "博物馆日", "weather_note": "晴",
-                          "items": [{"time": "14:00", "name": "广州博物馆",
-                                     "poi_id": "guangzhou-001", "note": "按修改要求"}]}],
+                          "items": [{"name": "广州博物馆", "poi_id": "guangzhou-001",
+                                     "suggested_time": "建议上午 9:00-11:00 前往",
+                                     "time_reason": "馆内人少、观展从容", "note": "按修改要求"}]}],
                 "summary": base.get("summary"),
                 "warnings": list(base.get("warnings", [])),
             }
@@ -47,7 +48,7 @@ class ReplanFakeProvider(FakeProvider):
                 for day in itinerary.get("days") or []:
                     day = dict(day)
                     day["title"] = "博物馆日"
-                    day["items"] = [{"time": "14:00", "name": "广州博物馆", "note": "按修改要求"}]
+                    day["items"] = [{"name": "广州博物馆", "note": "按修改要求"}]
                     days.append(day)
                 itinerary["days"] = days
                 return itinerary
@@ -56,7 +57,9 @@ class ReplanFakeProvider(FakeProvider):
 
 ITINERARY = {
     "days": [{"day": 1, "title": "广州地标", "weather_note": "晴",
-              "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": "夜景"}]}],
+              "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                         "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳",
+                         "note": "夜景"}]}],
     "summary": "OK", "warnings": [],
 }
 

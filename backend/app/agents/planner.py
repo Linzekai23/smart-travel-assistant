@@ -22,8 +22,8 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
       "title": "当日主题，如 广州地标与珠江夜景",
       "weather_note": "当日天气一句话，如 晴 24°C",
       "items": [
-        {"time": "09:00", "name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "note": "为什么去/怎么玩，10-20 字"},
-        {"time": "12:30", "name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）"}
+        {"name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "suggested_time": "建议到访时段，如 建议上午 8:00-10:00 前往 / 建议傍晚 17:00 后前往", "time_reason": "为什么建议该时段，如 清晨人少、光线好，10-20 字", "note": "为什么去/怎么玩，10-20 字"},
+        {"name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）"}
       ]
     }
   ],
@@ -31,7 +31,8 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
   "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"]
 }
 规则：
-- 每天 3-5 项，时间从早到晚；餐饮穿插在景点之间，每天 1-2 餐
+- 每天 3-5 项，按游览顺序排列（建议时段由早到晚）；餐饮穿插在景点之间，每天 1-2 餐
+- 只有景点条目填 suggested_time 与 time_reason（为什么建议该时段）；餐厅/酒店/购物等非景点条目不要填
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
@@ -60,8 +61,17 @@ def format_itinerary(itinerary: dict) -> str:
             lines.append(f"> 天气：{note}")
         for item in day.get("items", []):
             name = item["name"]
+            bits = []
+            when = item.get("suggested_time")
+            if when:
+                bits.append(f"建议{when}")
+            time_reason = item.get("time_reason")
+            if time_reason:
+                bits.append(f"理由：{time_reason}")
             note_text = item.get("note")
-            lines.append(f"- **{item.get('time', '')}** {name}{('（' + note_text + '）') if note_text else ''}")
+            if note_text:
+                bits.append(note_text)
+            lines.append(f"- **{name}**" + (f"（{'；'.join(bits)}）" if bits else ""))
         lines.append("")
     if itinerary.get("summary"):
         lines.append(f"**行程总结**：{itinerary['summary']}")
@@ -161,7 +171,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
     if itinerary.get("days") and not _has_candidate_reference(itinerary) and candidates:
         top = candidates[0]
         first = itinerary["days"][0]
-        injected = {"time": "09:00", "name": top["name"], "poi_id": top["poi_id"],
+        injected = {"name": top["name"], "poi_id": top["poi_id"],
+                    "suggested_time": "上午 8:00-10:00 前往", "time_reason": "清晨游客较少",
                     "note": "推荐安排"}
         first["items"] = [injected] + (first.get("items") or [])
 

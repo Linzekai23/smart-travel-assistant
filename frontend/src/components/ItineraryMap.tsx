@@ -7,7 +7,8 @@ export interface MapPoint {
   name: string;
   lat: number;
   lng: number;
-  time?: string;
+  suggested_time?: string;
+  time_reason?: string;
   note?: string;
 }
 
@@ -69,7 +70,12 @@ export default function ItineraryMap({ days, activeDay }: Props) {
               <Popup>
                 <div className="text-xs">
                   <p className="font-semibold">{p.name}</p>
-                  {p.time && <p>时间：{p.time}</p>}
+                  {p.suggested_time && (
+                    <p>
+                      建议{p.suggested_time}
+                      {p.time_reason ? `（${p.time_reason}）` : ""}
+                    </p>
+                  )}
                   {p.note && <p>{p.note}</p>}
                 </div>
               </Popup>

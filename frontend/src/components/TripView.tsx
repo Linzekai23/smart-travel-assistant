@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { Card, Table, Tabs, Tag, Timeline } from "antd";
 import type { TableProps } from "antd";
-import { BulbOutlined, CloudOutlined } from "@ant-design/icons";
+import { BulbOutlined, ClockCircleOutlined, CloudOutlined } from "@ant-design/icons";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
 
 export interface TripItem {
-  time?: string;
   name: string;
   note?: string;
+  // 景点专属：建议到访时段 + 为什么建议该时段（餐厅/酒店无）
+  suggested_time?: string;
+  time_reason?: string;
   poi_id?: string;
   lat?: number;
   lng?: number;
@@ -71,7 +73,8 @@ export default function TripView({ trip }: Props) {
             name: it.name,
             lat: it.lat,
             lng: it.lng,
-            time: it.time,
+            suggested_time: it.suggested_time,
+            time_reason: it.time_reason,
             note: it.note,
           })),
       })),
@@ -124,15 +127,21 @@ export default function TripView({ trip }: Props) {
           <Timeline
             items={(d.items ?? []).map((it) => ({
               children: (
-                <>
-                  <span className="font-mono text-xs text-slate-400">
-                    {it.time ?? "--:--"}
-                  </span>{" "}
+                <div>
                   <span className="text-slate-800">{it.name}</span>
                   {it.note && (
-                    <span className="text-xs text-slate-500">（{it.note}）</span>
+                    <span className="ml-1 text-xs text-slate-500">
+                      （{it.note}）
+                    </span>
                   )}
-                </>
+                  {it.suggested_time && (
+                    <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                      <ClockCircleOutlined className="text-brand" />
+                      <span>建议{it.suggested_time}</span>
+                      {it.time_reason && <span>（{it.time_reason}）</span>}
+                    </div>
+                  )}
+                </div>
               ),
             }))}
           />

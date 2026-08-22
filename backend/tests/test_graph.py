@@ -16,7 +16,9 @@ def _fake() -> FakeProvider:
         "预算分配JSON": {"items": [{"category": "住宿", "amount": 3200, "note": "中档酒店"}],
                         "total": 8000},
         "行程规划JSON": {"days": [{"day": 1, "title": "广州地标", "weather_note": "晴",
-                                  "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": ""}]}],
+                                  "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                                             "suggested_time": "建议晚上 19:00 后前往",
+                                             "time_reason": "夜景绝佳", "note": ""}]}],
                         "summary": "OK", "warnings": []},
         "汇总JSON": {"summary": "整体节奏合理。", "tips": ["周三起降温"]},
     })

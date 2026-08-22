@@ -4,7 +4,9 @@ from conftest import FakeProvider
 
 ITINERARY = {
     "days": [{"day": 1, "title": "广州地标", "weather_note": "晴 24°C",
-              "items": [{"time": "19:00", "name": "广州塔", "poi_id": "guangzhou-001", "note": "夜景"}]}],
+              "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                         "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳",
+                         "note": "夜景"}]}],
     "summary": "首日珠江夜景线。", "warnings": [],
 }
 BUDGET = {
