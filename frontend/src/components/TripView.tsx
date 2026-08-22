@@ -243,15 +243,13 @@ export default function TripView({ trip }: Props) {
                     </span>
                   </div>
                 )}
-                {a.photo_url && (
-                  <div className="pl-6">
-                    <AttractionImage
-                      name={a.name}
-                      city={a.city}
-                      photoUrl={a.photo_url}
-                    />
-                  </div>
-                )}
+                <div className="pl-6">
+                  <AttractionImage
+                    name={a.name}
+                    city={a.city}
+                    photoUrl={a.photo_url}
+                  />
+                </div>
                 {(a.location_note ||
                   a.commute_note ||
                   a.price_note ||
