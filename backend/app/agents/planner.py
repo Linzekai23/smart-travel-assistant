@@ -43,6 +43,7 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 餐厅/酒店条目必须从候选餐厅/酒店中选取并引用其 poi_id（真实商家）；仅当候选餐厅/酒店不足时才可编造并在名称后标注（示例）且不填 poi_id
+- 同一 poi_id 全程只能引用一次（每家餐厅/酒店/景点只出现一次，不要多天重复安排同一家）
 - 住宿推荐集中安排：优先选景点集中的区域住一家、覆盖整个行程（days 列全程天数），通勤方便；仅当某天景点与主住宿区距离确实较远（如跨市郊景区）才换第 2 家并在 commute_note 说明原因；住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
@@ -180,15 +181,31 @@ def _save_detail_cache(cache: dict) -> None:
 
 
 def _clean_itinerary(itinerary: dict, candidate_ids: set) -> None:
-    """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）。"""
+    """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）；
+    同一 poi_id 全程只保留第一次出现（LLM 会同一餐厅连选多天，如丽江塘钓鱼×5）。"""
+    seen: set[str] = set()
     for day in itinerary.get("days") or []:
         kept = []
         for item in day.get("items", []):
             pid = item.get("poi_id")
             if pid is not None and pid not in candidate_ids:
                 continue  # 编造的 POI 直接丢弃
+            if pid and pid in seen:
+                continue  # 重复引用同一 POI
+            if pid:
+                seen.add(pid)
             kept.append(item)
         day["items"] = kept
+    if itinerary.get("accommodation") is not None:
+        kept_acc = []
+        for a in itinerary["accommodation"]:
+            pid = a.get("poi_id")
+            if pid and pid in seen:
+                continue
+            if pid:
+                seen.add(pid)
+            kept_acc.append(a)
+        itinerary["accommodation"] = kept_acc
 
 
 def _has_candidate_reference(itinerary: dict, attraction_ids: set) -> bool:

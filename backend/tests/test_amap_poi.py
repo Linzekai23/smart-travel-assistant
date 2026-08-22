@@ -237,3 +237,23 @@ def test_search_tolerates_non_dict_photos(tmp_path):
     assert len(out) == 1
     assert out[0]["name"] == "马旺子·川小馆(太古里店)"
     assert out[0]["photo_url"] is None
+
+
+def test_fishing_venues_filtered_from_restaurants(tmp_path):
+    """垂钓园等休闲场所混在餐饮服务里（如"丽江塘钓鱼"）→ 不进餐厅候选。"""
+    payload = {
+        "status": "1",
+        "pois": [
+            {"id": "F1", "name": "丽江塘钓鱼",
+             "type": "餐饮服务;休闲餐饮场所|体育休闲服务;体育休闲服务场所",
+             "location": "104.08,30.65", "address": "青城山", "tel": "", "photos": []},
+            {"id": "F2", "name": "文化渔乐钓场", "type": "餐饮服务;中餐厅",
+             "location": "104.08,30.65", "address": "x", "tel": "", "photos": []},
+            {"id": "F3", "name": "十八里家常鱼庄", "type": "餐饮服务;中餐厅",
+             "location": "104.08,30.65", "address": "x", "tel": "", "photos": []},
+        ],
+    }
+    http = FakeHttp(payload=payload)
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_restaurants("成都")
+    assert [i["name"] for i in out] == ["十八里家常鱼庄"]   # 鱼庄是餐厅，保留

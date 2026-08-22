@@ -23,6 +23,7 @@ HOTEL_TYPE = "100000"   # 住宿服务
 FOOD_MAIN = "餐饮服务"
 HOTEL_MAIN = "住宿服务"
 BRANCH_SUFFIX_RE = re.compile(r"[（(][^（()）]{0,10}店[）)]$")  # 分店后缀（观锦餐厅(天府新谷店)）
+FISHING_VENUE_RE = re.compile(r"垂钓|钓场|鱼塘|钓鱼")  # 垂钓园混入餐饮服务（如"丽江塘钓鱼"），不是吃饭的店
 MIN_PHOTO_SCORE = 100.0  # 照片"阳光指数"下限：低于此分判太暗/太灰，酒店换通用大堂图
 
 
@@ -135,6 +136,9 @@ class AmapPoiService:
             if not isinstance(p, dict) or not str(p.get("type") or "").startswith(main_type):
                 continue  # 裸搜会混入其他分类（如美食结果里的住宿服务）
             name = str(p.get("name") or "").strip()
+            if category == "restaurant" and (FISHING_VENUE_RE.search(name)
+                                             or "体育休闲服务" in str(p.get("type") or "")):
+                continue  # 垂钓园/钓场等休闲场所混在餐饮服务里（如"丽江塘钓鱼"），不是用餐商家
             base = BRANCH_SUFFIX_RE.sub("", name)
             if not name or base in seen:
                 continue  # 同一连锁分店只留第一条

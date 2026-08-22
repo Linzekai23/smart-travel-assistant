@@ -451,3 +451,22 @@ def test_planner_restaurant_only_reference_still_injects_attraction(monkeypatch)
     assert items[1]["poi_id"] == "amap-B0FFH1"     # 餐厅条目保留（放行）
     # 行程 + 纠正重试：示例景点经 enrich 名称匹配获 poi_id（非语料外），无需补全调用
     assert len(fake.calls) == 2
+
+
+def test_clean_itinerary_drops_duplicate_poi_id():
+    """同一 poi_id 全程只保留第一次出现（LLM 同一餐厅连选多天 → "丽江塘钓鱼"×5 回归）。"""
+    itin = {"days": [
+        {"day": 1, "title": "x", "weather_note": "",
+         "items": [{"name": "A", "poi_id": "amap-1", "note": "午餐"},
+                   {"name": "A", "poi_id": "amap-1", "note": "晚餐"},
+                   {"name": "B", "poi_id": "amap-2", "note": "午餐"}]},
+        {"day": 2, "title": "x", "weather_note": "",
+         "items": [{"name": "A", "poi_id": "amap-1", "note": "午餐"},
+                   {"name": "B（示例）", "note": "午餐"}]}],
+        "accommodation": [{"name": "H1", "poi_id": "amap-9", "days": [1, 2]},
+                          {"name": "H2", "poi_id": "amap-9", "days": [1, 2]}],
+        "summary": "x", "warnings": []}
+    planner._clean_itinerary(itin, {"amap-1", "amap-2", "amap-9"})
+    ids = [it.get("poi_id") for d in itin["days"] for it in d["items"]]
+    assert ids == ["amap-1", "amap-2", None]      # 第 2 天的重复引用被丢弃，示例条目保留
+    assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-9"]
