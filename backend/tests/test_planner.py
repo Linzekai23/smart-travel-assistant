@@ -3,6 +3,7 @@ import json
 from app.agents import planner
 
 from conftest import FakeProvider
+import pytest
 
 CANDIDATES = [
     {"poi_id": "guangzhou-001", "province": "广东", "city": "广州", "name": "广州塔",
@@ -36,6 +37,29 @@ BUDGET_PLAN = {
 }
 
 WEATHER = [{"date": "2026-10-01", "t_max": 24.0, "t_min": 16.0, "condition": "晴", "source": "open-meteo"}]
+
+
+class FakeAmap:
+    """测试替身高德检索：默认空（既有测试降级为示例数据模式，调用次数可查）。"""
+
+    def __init__(self, restaurants=None, hotels=None) -> None:
+        self.restaurants = restaurants or []
+        self.hotels = hotels or []
+        self.calls: list[str] = []
+
+    def search_restaurants(self, city: str) -> list:
+        self.calls.append(city)
+        return self.restaurants
+
+    def search_hotels(self, city: str) -> list:
+        self.calls.append(city)
+        return self.hotels
+
+
+@pytest.fixture(autouse=True)
+def _no_amap(monkeypatch):
+    """所有 planner 测试默认无高德候选（隔离网络，走示例数据降级路径）。"""
+    monkeypatch.setattr(planner, "_amap_service", FakeAmap())
 
 
 def _fake():
@@ -341,3 +365,56 @@ def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
     assert item["note"] == "推荐安排"
     assert item["suggested_time"] == "上午 8:00-10:00 前往"  # 注入兜底带建议时段
     assert item["lat"] == 23.1066  # 富化正常
+
+
+AMAP_RESTAURANT = {"poi_id": "amap-B0FFH1", "name": "马旺子·川小馆(太古里店)",
+                   "city": "广州", "category": "restaurant", "lat": 23.12, "lng": 113.32,
+                   "address": "中纱帽街8号", "tel": "028-88888888",
+                   "photo_url": "https://a.amap.com/p1.jpg"}
+AMAP_HOTEL = {"poi_id": "amap-B0FFH9", "name": "世外桃源酒店", "city": "广州",
+              "category": "hotel", "lat": 23.13, "lng": 113.31,
+              "address": "天河路1号", "tel": "020-12345678", "photo_url": None}
+
+
+def test_planner_queries_amap_and_injects_candidates(monkeypatch):
+    """planner 按候选城市查高德美食/酒店；真实商家进候选上下文。"""
+    amap = FakeAmap(restaurants=[AMAP_RESTAURANT], hotels=[AMAP_HOTEL])
+    monkeypatch.setattr(planner, "_amap_service", amap)
+    fake = _fake()
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert amap.calls == ["广州", "广州"]  # 美食 + 酒店各一次
+    prompt = fake.calls[0][-1]["content"]
+    assert "候选餐厅" in prompt and "马旺子·川小馆" in prompt
+    assert "候选酒店" in prompt and "世外桃源酒店" in prompt
+    assert "中纱帽街8号" in prompt  # 地址进上下文（LLM 可引用）
+
+
+def test_planner_enriches_amap_referenced_items(monkeypatch):
+    """行程引用 amap- poi_id 的餐厅条目被 enrich 附真实字段（地址/电话/照片）。"""
+    amap = FakeAmap(restaurants=[AMAP_RESTAURANT], hotels=[AMAP_HOTEL])
+    monkeypatch.setattr(planner, "_amap_service", amap)
+    itin = {"days": [{"day": 1, "title": "广州美食", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                                 "suggested_time": "建议晚上 19:00 后前往",
+                                 "time_reason": "夜景绝佳", "note": "夜景",
+                                 "detail": "广州塔高600米，昵称小蛮腰。"},
+                                {"name": "马旺子·川小馆(太古里店)", "poi_id": "amap-B0FFH1",
+                                 "note": "午餐", "detail": "招牌：川菜"}]}],
+            "accommodation": [], "summary": "OK", "warnings": []}
+    fake = FakeProvider(json_responses={"行程": itin})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    food = out["itinerary"]["days"][0]["items"][1]
+    assert food["category"] == "restaurant"
+    assert food["address"] == "中纱帽街8号"
+    assert food["tel"] == "028-88888888"
+    assert food["photo_url"] == "https://a.amap.com/p1.jpg"
+    assert food["lat"] == 23.12 and food["lng"] == 113.32
+
+
+def test_planner_amap_failure_falls_back_to_examples(monkeypatch):
+    """高德候选为空（无 key/失败）→ 上下文无餐厅段，LLM 照旧编示例，行为不变。"""
+    monkeypatch.setattr(planner, "_amap_service", FakeAmap())
+    fake = _fake()
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    prompt = fake.calls[0][-1]["content"]
+    assert "候选餐厅" not in prompt and "候选酒店" not in prompt

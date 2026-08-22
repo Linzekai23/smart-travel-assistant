@@ -13,6 +13,10 @@ from pathlib import Path
 from app import events
 from app.itinerary import enrich_itinerary
 from app.llm.deepseek import DeepSeekProvider
+from app.api import amap_poi as amap_poi_mod
+
+# 高德真实餐厅/酒店检索（模块级注入点：测试 monkeypatch 替换为 FakeAmap）
+_amap_service = amap_poi_mod.service
 
 PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据用户画像、候选景点、预算约束与天气，生成逐日行程。
 只输出 JSON 对象（不要 markdown、不要其他文字），schema：
@@ -24,13 +28,13 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
       "weather_note": "当日天气一句话，如 晴 24°C",
       "items": [
         {"name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "suggested_time": "建议到访时段，如 建议上午 8:00-10:00 前往 / 建议傍晚 17:00 后前往", "time_reason": "为什么建议该时段，如 清晨人少、光线好，10-20 字", "note": "为什么去/怎么玩，10-20 字", "detail": "景点详细介绍 150-250 字：历史沿革、主要看点（具体点位/分区/建筑）、门票与开放时间、建议游玩时长，信息密度高，避免套话"},
-        {"name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）", "detail": "推荐美食，如 招牌：夫妻肺片、担担面，10-30 字"}
+        {"name": "餐厅名", "poi_id": "候选餐厅的 poi_id（有候选餐厅时必须引用）", "note": "午餐/晚餐", "detail": "推荐美食，如 招牌：夫妻肺片、担担面，10-30 字"}
       ]
     }
   ],
   "summary": "整体行程总结，50 字以内",
   "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"],
-  "accommodation": [{"name": "酒店名（示例）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算", "detail": "酒店环境与设施介绍，如 大堂现代、带健身房与自助早餐，近地铁口，10-30 字"}]
+  "accommodation": [{"name": "候选酒店名", "poi_id": "候选酒店的 poi_id（有候选酒店时必须引用）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算", "detail": "酒店环境与设施介绍，如 大堂现代、带健身房与自助早餐，近地铁口，10-30 字"}]
 }
 规则：
 - 每天 3-5 项，按游览顺序排列（建议时段由早到晚）；餐饮穿插在景点之间，每天 1-2 餐
@@ -38,7 +42,7 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 - 每个景点必须填 detail（详细介绍 150-250 字，具体信息：门票、开放时间、看点分区、游玩时长）；餐厅/住宿 detail 简短（10-30 字）
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
-- 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
+- 餐厅/酒店条目必须从候选餐厅/酒店中选取并引用其 poi_id（真实商家）；仅当候选餐厅/酒店不足时才可编造并在名称后标注（示例）且不填 poi_id
 - 住宿推荐集中安排：优先选景点集中的区域住一家、覆盖整个行程（days 列全程天数），通勤方便；仅当某天景点与主住宿区距离确实较远（如跨市郊景区）才换第 2 家并在 commute_note 说明原因；住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
@@ -46,11 +50,26 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 
 
 def build_candidate_context(candidates: list[dict]) -> str:
-    """把 Researcher 产出的候选景点（POI + 推荐理由）拼成 LLM 上下文。"""
+    """把候选（景点 + 高德真实餐厅/酒店）拼成 LLM 上下文。"""
     lines = ["候选景点（必须从中选景点并引用 poi_id）:"]
     for p in candidates:
+        if p.get("category") in ("restaurant", "hotel"):
+            continue
         reason = f"，推荐理由：{p['reason']}" if p.get("reason") else ""
         lines.append(f"- {p['name']}（{p['city']}，评分{p['rating']}，价位档{p['price_tier']}）: {p['description']}{reason}")
+    for label, category in (("候选餐厅（真实商家，从中引用 poi_id）:", "restaurant"),
+                            ("候选酒店（真实商家，从中引用 poi_id）:", "hotel")):
+        group = [p for p in candidates if p.get("category") == category]
+        if not group:
+            continue
+        lines.append(label)
+        for p in group:
+            bits = [p["name"]]
+            if p.get("address"):
+                bits.append(f"地址：{p['address']}")
+            if p.get("tel"):
+                bits.append(f"电话：{p['tel']}")
+            lines.append(f"- {'，'.join(bits)}")
     return "\n".join(lines) if lines else "（无候选景点）"
 
 
@@ -201,6 +220,13 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         }
 
     candidates: list[dict] = state.get("candidates", [])
+    if region_resolved is True and candidates:
+        # 高德真实餐厅/酒店候选（无 key/失败返回 [] → LLM 照旧编示例数据）
+        city = candidates[0].get("city")
+        if city:
+            candidates = (candidates
+                          + _amap_service.search_restaurants(city)
+                          + _amap_service.search_hotels(city))
     if region_resolved is True and not candidates:
         # KB 为空/未入库：researcher 已归一化区域但无候选 → 降级提示，不调用 LLM
         # （否则 LLM 会编造景点，幻觉清洗保留无 poi_id 条目，渲染成貌似真实的行程）
