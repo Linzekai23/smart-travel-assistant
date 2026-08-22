@@ -7,11 +7,14 @@ import {
   CloudOutlined,
   HomeOutlined,
 } from "@ant-design/icons";
+import AttractionImage from "./AttractionImage";
 import ItineraryMap, { type DayGeo } from "./ItineraryMap";
 
 export interface TripItem {
   name: string;
   note?: string;
+  // 详细介绍：景点 80-120 字（历史/看点），餐厅推荐美食，住宿环境
+  detail?: string;
   // 景点专属：建议到访时段 + 为什么建议该时段（餐厅/酒店无）
   suggested_time?: string;
   time_reason?: string;
@@ -34,6 +37,7 @@ export interface Accommodation {
   location_note?: string;
   commute_note?: string;
   price_note?: string;
+  detail?: string;
 }
 
 export interface Trip {
@@ -159,6 +163,12 @@ export default function TripView({ trip }: Props) {
                       {it.time_reason && <span>（{it.time_reason}）</span>}
                     </div>
                   )}
+                  {it.detail && (
+                    <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                      {it.detail}
+                    </p>
+                  )}
+                  {it.poi_id && <AttractionImage name={it.name} />}
                 </div>
               ),
             }))}
@@ -179,11 +189,15 @@ export default function TripView({ trip }: Props) {
                     <Tag>{`第${a.days.join("、")}天`}</Tag>
                   ) : null}
                 </div>
-                {(a.location_note || a.commute_note || a.price_note) && (
+                {(a.location_note ||
+                  a.commute_note ||
+                  a.price_note ||
+                  a.detail) && (
                   <div className="mt-1 space-y-0.5 pl-6 text-xs text-slate-500">
                     {a.location_note && <div>位置：{a.location_note}</div>}
                     {a.commute_note && <div>通勤：{a.commute_note}</div>}
                     {a.price_note && <div>价格：{a.price_note}</div>}
+                    {a.detail && <div>环境：{a.detail}</div>}
                   </div>
                 )}
               </li>

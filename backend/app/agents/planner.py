@@ -22,18 +22,19 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
       "title": "当日主题，如 广州地标与珠江夜景",
       "weather_note": "当日天气一句话，如 晴 24°C",
       "items": [
-        {"name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "suggested_time": "建议到访时段，如 建议上午 8:00-10:00 前往 / 建议傍晚 17:00 后前往", "time_reason": "为什么建议该时段，如 清晨人少、光线好，10-20 字", "note": "为什么去/怎么玩，10-20 字"},
-        {"name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）"}
+        {"name": "景点名", "poi_id": "候选列表中的景点 id（景点必须引用）", "suggested_time": "建议到访时段，如 建议上午 8:00-10:00 前往 / 建议傍晚 17:00 后前往", "time_reason": "为什么建议该时段，如 清晨人少、光线好，10-20 字", "note": "为什么去/怎么玩，10-20 字", "detail": "景点详细介绍 80-120 字：历史沿革、特色看点、游览提示，真实信息密度高"},
+        {"name": "餐厅名（示例）", "note": "午餐（示例数据，由你基于常识生成）", "detail": "推荐美食，如 招牌：夫妻肺片、担担面，10-30 字"}
       ]
     }
   ],
   "summary": "整体行程总结，50 字以内",
   "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"],
-  "accommodation": [{"name": "酒店名（示例）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算"}]
+  "accommodation": [{"name": "酒店名（示例）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算", "detail": "酒店环境与设施介绍，如 大堂现代、带健身房与自助早餐，近地铁口，10-30 字"}]
 }
 规则：
 - 每天 3-5 项，按游览顺序排列（建议时段由早到晚）；餐饮穿插在景点之间，每天 1-2 餐
 - 只有景点条目填 suggested_time 与 time_reason（为什么建议该时段）；餐厅/酒店/购物等非景点条目不要填
+- 每个景点必须填 detail（详细介绍 80-120 字）；餐厅/住宿 detail 简短（10-30 字）
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 酒店与餐厅是示例数据：由你基于目的地常识生成名称，名称后标注（示例），不要填 poi_id
@@ -73,6 +74,9 @@ def format_itinerary(itinerary: dict) -> str:
             if note_text:
                 bits.append(note_text)
             lines.append(f"- **{name}**" + (f"（{'；'.join(bits)}）" if bits else ""))
+            detail = item.get("detail")
+            if detail:
+                lines.append(f"> {detail}")
         lines.append("")
     for acc in itinerary.get("accommodation") or []:
         if not lines or lines[-1] != "":
@@ -85,6 +89,8 @@ def format_itinerary(itinerary: dict) -> str:
             if acc.get(key):
                 bits.append(acc[key])
         lines.append("- 🏨 " + "；".join(bits))
+        if acc.get("detail"):
+            lines.append(f"> {acc['detail']}")
     if itinerary.get("summary"):
         lines.append(f"**行程总结**：{itinerary['summary']}")
     for w in itinerary.get("warnings", []):
@@ -174,19 +180,30 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         # 零引用兜底：追加纠正指令重试一次（无引用 = 地图空图，M5 冒烟实证 LLM 会
         # 把所有条目标（示例）规避引用规则）
         messages.append({"role": "user", "content": (
-            "上一版行程没有引用任何候选景点的 poi_id，违反规则（每天至少 1-2 个候选景点"
-            "并引用 poi_id，仅餐厅/酒店等非景点条目可标注（示例））。请重新输出行程 JSON。"
+            "上一版行程没有引用任何候选景点的 poi_id，违反规则（每天必须至少安排 1-2 个"
+            "候选景点并从候选列表中选择，景点条目必须填 poi_id 且严禁标注（示例），"
+            "仅餐厅/酒店等非景点条目可标注（示例））。请重新输出行程 JSON，"
+            "景点 detail 用 80-120 字详细介绍。"
         )})
 
-    # 兜底：两轮 LLM 均零引用候选 → 确定性注入 top-1 候选（地图数据链保证；M5 冒烟
-    # 实证真实 LLM 会连续两轮规避引用规则，纯提示词级重试不足以保证标记）
+    # 兜底：两轮 LLM 均零引用候选 → 确定性逐天注入不同的候选景点（每天一个
+    # 主要景点，地图多点、detail 由 enrich 附候选 description；M5 冒烟实证真实
+    # LLM 会连续两轮规避引用规则，纯提示词级重试不足以保证标记）
     if itinerary.get("days") and not _has_candidate_reference(itinerary) and candidates:
-        top = candidates[0]
-        first = itinerary["days"][0]
-        injected = {"name": top["name"], "poi_id": top["poi_id"],
-                    "suggested_time": "上午 8:00-10:00 前往", "time_reason": "清晨游客较少",
-                    "note": "推荐安排"}
-        first["items"] = [injected] + (first.get("items") or [])
+        used: set = set()
+        _slots = [("上午 8:00-10:00 前往", "清晨游客较少"),
+                  ("下午 14:00-16:00 前往", "午后光线好、游客相对少"),
+                  ("傍晚 17:00 后前往", "避开正午人流，夜景更美")]
+        for day in itinerary["days"]:
+            cand = next((c for c in candidates if c.get("poi_id") and c["poi_id"] not in used), None)
+            if cand is None:
+                break
+            used.add(cand["poi_id"])
+            when, why = _slots[min(len(used) - 1, len(_slots) - 1)]
+            injected = {"name": cand["name"], "poi_id": cand["poi_id"],
+                        "suggested_time": when, "time_reason": why,
+                        "note": "推荐安排"}
+            day["items"] = [injected] + (day.get("items") or [])
 
     # M5：富化行程（景点条目按 poi_id 附候选坐标），供前端地图/日卡与 trip 落库
     itinerary = enrich_itinerary(itinerary, candidates)

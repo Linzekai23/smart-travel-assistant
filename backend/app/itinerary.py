@@ -25,6 +25,9 @@ def enrich_itinerary(itinerary: dict, candidates: list[dict]) -> dict:
             for field in ("lat", "lng", "name", "category", "reason", "description"):
                 if cand.get(field) is not None:
                     enriched[field] = cand[field]
+            # detail 兜底：LLM 未写详细介绍（如注入兜底条目）时附候选 description
+            if not enriched.get("detail") and cand.get("description"):
+                enriched["detail"] = cand["description"]
             items.append(enriched)
         days.append({**day, "items": items})
     return {**itinerary, "days": days}

@@ -45,6 +45,23 @@ def test_enrich_keeps_unmatched_poi_id():
     assert "lat" not in miss and miss["poi_id"] == "nope-999"  # 未命中不附加
 
 
+def test_enrich_fills_detail_from_candidate_description():
+    """detail 兜底：LLM 未写详细介绍（如注入兜底条目）时附候选 description。"""
+    out = enrich_itinerary(ITINERARY, CANDIDATES)
+    item = out["days"][0]["items"][0]  # 广州塔无 detail
+    assert item["detail"] == "珠江畔地标。"
+
+
+def test_enrich_keeps_llm_detail_over_candidate_description():
+    """条目已有 detail 时保留 LLM 原文，不被候选 description 覆盖。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": "",
+                               "detail": "LLM 写的详细介绍"}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
+    assert item["detail"] == "LLM 写的详细介绍"
+
+
 def test_enrich_tolerates_missing_candidate_fields():
     out = enrich_itinerary(ITINERARY, CANDIDATES)
     # guangzhou-002 缺 description/reason：构造一个引用它的行程验证字段缺失时不附加

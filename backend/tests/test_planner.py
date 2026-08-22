@@ -17,12 +17,15 @@ ITINERARY = {
     "days": [{"day": 1, "title": "广州地标", "weather_note": "晴 24°C",
               "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
                          "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳、江风凉爽",
-                         "note": "夜景"},
-                        {"name": "点都德（示例）", "note": "午餐"}]}],
+                         "note": "夜景",
+                         "detail": "广州塔高600米，昵称小蛮腰，登顶可俯瞰珠江新城全景，夜晚灯光秀不容错过。"},
+                        {"name": "点都德（示例）", "note": "午餐",
+                         "detail": "招牌：虾饺、红米肠、艇仔粥"}]}],
     "accommodation": [{"name": "锦江宾馆（示例）", "days": [1, 2],
                        "location_note": "锦江区，近春熙路",
                        "commute_note": "到当日景点约 15-30 分钟车程",
-                       "price_note": "中档，符合预算"}],
+                       "price_note": "中档，符合预算",
+                       "detail": "大堂现代、带健身房与自助早餐，近地铁口"}],
     "summary": "OK", "warnings": [],
 }
 
@@ -142,6 +145,13 @@ def test_format_itinerary_includes_accommodation():
     assert "锦江区，近春熙路" in text          # 位置理由
     assert "到当日景点约 15-30 分钟车程" in text  # 通勤理由
     assert "中档，符合预算" in text             # 价格理由
+    assert "大堂现代、带健身房与自助早餐" in text  # 住宿环境
+
+
+def test_format_itinerary_includes_detail():
+    text = planner.format_itinerary(ITINERARY)
+    assert "小蛮腰" in text and "> " in text     # 景点详细介绍
+    assert "招牌：虾饺、红米肠" in text           # 餐厅推荐美食
 
 
 def test_planner_enriches_itinerary_with_candidate_coords():
@@ -212,6 +222,27 @@ def test_planner_llm_exception_no_retry():
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     assert len(fake.calls) == 1
     assert out["last_reply"] == "行程总结："
+
+
+def test_planner_injects_distinct_candidate_per_day():
+    """零引用兜底逐天注入：每天一个不同候选（3 天 → 广州塔/白云山，不重复）。"""
+    zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                          "items": [{"name": "点都德（示例）", "note": "午餐"}]},
+                         {"day": 2, "title": "x", "weather_note": "晴",
+                          "items": [{"name": "陶陶居（示例）", "note": "午餐"}]},
+                         {"day": 3, "title": "x", "weather_note": "晴",
+                          "items": [{"name": "莲香楼（示例）", "note": "午餐"}]}],
+                "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
+                                        "上一版行程没有引用": zero_ref})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    days = out["itinerary"]["days"]
+    assert days[0]["items"][0]["poi_id"] == "guangzhou-001"  # 逐天取不同候选
+    assert days[1]["items"][0]["poi_id"] == "guangzhou-002"
+    assert "poi_id" not in days[2]["items"][0]  # 候选耗尽后不再注入（不重复景点）
+    assert days[0]["items"][0]["suggested_time"] == "上午 8:00-10:00 前往"
+    assert days[1]["items"][0]["suggested_time"] == "下午 14:00-16:00 前往"
+    assert days[0]["items"][0]["detail"] == "珠江畔地标。"  # enrich 用候选 description 兜底 detail
 
 
 def test_planner_prompt_requires_candidate_reference():

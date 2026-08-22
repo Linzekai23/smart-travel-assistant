@@ -59,11 +59,13 @@ ITINERARY = {
     "days": [{"day": 1, "title": "广州地标", "weather_note": "晴",
               "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
                          "suggested_time": "建议晚上 19:00 后前往", "time_reason": "夜景绝佳",
-                         "note": "夜景"}]}],
+                         "note": "夜景",
+                         "detail": "广州塔高600米，昵称小蛮腰，登顶可俯瞰珠江新城全景。"}]}],
     "accommodation": [{"name": "锦江宾馆（示例）", "days": [1, 2],
                        "location_note": "锦江区，近春熙路",
                        "commute_note": "到当日景点约 15-30 分钟车程",
-                       "price_note": "中档，符合预算"}],
+                       "price_note": "中档，符合预算",
+                       "detail": "大堂现代、带健身房与自助早餐"}],
     "summary": "OK", "warnings": [],
 }
 
