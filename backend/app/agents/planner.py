@@ -8,6 +8,7 @@ LLM 只产出结构化 JSON（days[] 引用候选 poi_id），回复文本由 fo
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from app import events
 from app.itinerary import enrich_itinerary
@@ -96,6 +97,64 @@ def format_itinerary(itinerary: dict) -> str:
     for w in itinerary.get("warnings", []):
         lines.append(f"⚠️ {w}")
     return "\n".join(lines).strip()
+
+
+SUPPLEMENT_PROMPT = """你是旅行信息补全助手。以下行程条目中，判断哪些是景点（景区/博物馆/公园/街区等），哪些不是（餐厅/酒店/购物等）。
+只输出 JSON 对象（标记词：景点补全），schema：
+{"items": [{"name": "条目原名", "is_attraction": true/false, "detail": "景点时：150-250字具体介绍：历史沿革、主要看点、门票价格与开放时间、建议游玩时长、交通提示；非景点时留空"}]}
+必须覆盖列表中的每个条目。"""
+
+
+def _supplement_extra_attractions(itinerary: dict, llm: DeepSeekProvider) -> None:
+    """语料外景点补全：行程里没有 poi_id、未匹配候选的条目（LLM 编造/语料缺失的
+    真实景点），调用一次 LLM 分类并生成具体介绍，附加 category=attraction + detail。
+
+    结果按景点名缓存到 data/attraction_details.json（同一景点只生成一次）；
+    LLM 异常/解析失败时保持原样，不阻塞行程。
+    """
+    extras = [it for day in itinerary.get("days") or []
+              for it in day.get("items", [])
+              if not it.get("poi_id") and not it.get("category")]
+    if not extras:
+        return
+    cache = _load_detail_cache()
+    todo = [it["name"] for it in extras if it["name"] not in cache]
+    if todo:
+        try:
+            resp = llm.chat_json([
+                {"role": "system", "content": SUPPLEMENT_PROMPT},
+                {"role": "user", "content": f"条目列表：{json.dumps(todo, ensure_ascii=False)}。"
+                                            "请按 schema 输出 JSON（标记词：景点补全）。"},
+            ])
+        except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
+            resp = {}
+        for info in (resp.get("items") or []) if isinstance(resp, dict) else []:
+            if isinstance(info, dict) and info.get("is_attraction") and info.get("detail"):
+                cache[info["name"]] = {"category": "attraction", "detail": info["detail"]}
+        if todo:
+            _save_detail_cache(cache)
+    for it in extras:
+        hit = cache.get(it["name"])
+        if hit:
+            it["category"] = hit["category"]
+            it["detail"] = hit["detail"]
+
+
+def _detail_cache_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "data" / "attraction_details.json"
+
+
+def _load_detail_cache() -> dict:
+    try:
+        return json.loads(_detail_cache_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_detail_cache(cache: dict) -> None:
+    _detail_cache_path().parent.mkdir(parents=True, exist_ok=True)
+    _detail_cache_path().write_text(
+        json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def _clean_itinerary(itinerary: dict, candidate_ids: set) -> None:
@@ -207,6 +266,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
 
     # M5：富化行程（景点条目按 poi_id 附候选坐标），供前端地图/日卡与 trip 落库
     itinerary = enrich_itinerary(itinerary, candidates)
+    # 语料外景点补全：LLM 编造/语料缺失的真实景点 → LLM 生成具体介绍（缓存）
+    _supplement_extra_attractions(itinerary, llm)
 
     if itinerary.get("days") is None:
         # days: null 不做 markdown 格式化，降级为摘要回复（T8-F4 回归）

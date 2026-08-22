@@ -74,6 +74,38 @@ def test_enrich_replaces_short_detail_with_candidate_description():
     assert item["detail"] == "珠江畔地标。"
 
 
+def test_enrich_matches_by_name_when_no_poi_id():
+    """LLM 不填 poi_id 时按名称包含匹配：'白云山景区' 匹配候选 '白云山'，
+    附 poi_id/坐标/description（前端图片与地图依赖这些字段）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "白云山景区", "note": "登山"}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-002"
+    assert item["lat"] == 23.18 and item["lng"] == 113.29
+    assert item["name"] == "白云山"  # 名称统一为候选名
+    assert item["note"] == "登山"    # 原字段保留
+    assert "detail" not in item      # 该候选故意缺 description，无兜底（数据限制）
+
+
+def test_enrich_name_match_takes_longest_candidate():
+    """多个候选同时包含时取名称最长者（最具体，防短名误配）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "广州塔夜景观光", "note": ""}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
+    assert item["poi_id"] == "guangzhou-001"  # 广州塔（4字）> 白云山（3字）
+
+
+def test_enrich_name_match_rejects_short_names():
+    """较短一方 <3 字不匹配（防 '白云山' 误配 '山'）。"""
+    it = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                    "items": [{"name": "山", "note": ""}]}],
+          "summary": "", "warnings": []}
+    item = enrich_itinerary(it, CANDIDATES)["days"][0]["items"][0]
+    assert "poi_id" not in item  # 原样保留
+
+
 def test_enrich_tolerates_missing_candidate_fields():
     out = enrich_itinerary(ITINERARY, CANDIDATES)
     # guangzhou-002 缺 description/reason：构造一个引用它的行程验证字段缺失时不附加

@@ -168,7 +168,9 @@ export default function TripView({ trip }: Props) {
                       {it.detail}
                     </p>
                   )}
-                  {it.poi_id && <AttractionImage name={it.name} />}
+                  {(it.poi_id || it.category === "attraction") && (
+                    <AttractionImage name={it.name} />
+                  )}
                 </div>
               ),
             }))}

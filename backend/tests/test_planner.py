@@ -197,8 +197,8 @@ def test_planner_retries_once_when_zero_candidate_reference():
                                "summary": "x", "warnings": []},
     })
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert len(fake.calls) == 2  # 重试了一次
-    assert "上一版行程没有引用" in fake.calls[-1][-1]["content"]  # 纠正指令送达
+    assert len(fake.calls) == 2  # 重试了一次（第二次行程只有 poi_id 条目，无需补全）
+    assert "上一版行程没有引用" in fake.calls[1][-1]["content"]  # 纠正指令送达
     item = out["itinerary"]["days"][0]["items"][0]
     assert item["poi_id"] == "guangzhou-001"
     assert item["lat"] == 23.1066  # 富化正常（现有集成）
@@ -210,9 +210,10 @@ def test_planner_zero_reference_twice_still_terminates():
                           "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
-                                        "上一版行程没有引用": zero_ref})
+                                        "上一版行程没有引用": zero_ref,
+                                        "景点补全": {"items": []}})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert len(fake.calls) == 2
+    assert len(fake.calls) == 3  # 行程 + 纠正重试 + 补全
     assert out["last_reply"].startswith("## ")
 
 
@@ -234,7 +235,8 @@ def test_planner_injects_distinct_candidate_per_day():
                           "items": [{"name": "莲香楼（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
-                                        "上一版行程没有引用": zero_ref})
+                                        "上一版行程没有引用": zero_ref,
+                                        "景点补全": {"items": []}})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
     days = out["itinerary"]["days"]
     assert days[0]["items"][0]["poi_id"] == "guangzhou-001"  # 逐天取不同候选
@@ -243,6 +245,80 @@ def test_planner_injects_distinct_candidate_per_day():
     assert days[0]["items"][0]["suggested_time"] == "上午 8:00-10:00 前往"
     assert days[1]["items"][0]["suggested_time"] == "下午 14:00-16:00 前往"
     assert days[0]["items"][0]["detail"] == "珠江畔地标。"  # enrich 用候选 description 兜底 detail
+
+
+def test_planner_supplements_extra_attractions(monkeypatch, tmp_path):
+    """语料外景点（无 poi_id 且名称未匹配候选）→ 补全调用生成具体介绍 + 景点标记。"""
+    monkeypatch.setattr(planner, "_detail_cache_path", lambda: tmp_path / "details.json")
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""},
+                                {"name": "锦里古街", "note": "逛古街"}]}],
+            "summary": "x", "warnings": []}
+    detail = ("锦里是成都武侯祠旁的仿古商业街，免费开放，主打川西民俗与小吃，"
+              "建议游玩2-3小时，地铁3号线高升桥站可达，晚上灯笼亮起更有味道。")
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": itin,
+        "景点补全": {"items": [{"name": "锦里古街", "is_attraction": True,
+                               "detail": detail}]}})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][1]
+    assert item["category"] == "attraction"  # 前端据此渲染图片
+    assert item["detail"] == detail
+    assert len(fake.calls) == 2  # 行程 + 补全
+
+
+def test_planner_supplement_keeps_non_attraction_unchanged(monkeypatch, tmp_path):
+    """补全判定为餐厅 → 不加景点标记、不覆盖 detail。"""
+    monkeypatch.setattr(planner, "_detail_cache_path", lambda: tmp_path / "details.json")
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""},
+                                {"name": "蜀风园（示例）", "note": "午餐",
+                                 "detail": "招牌：龙抄手"}]}],
+            "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": itin,
+        "景点补全": {"items": [{"name": "蜀风园（示例）", "is_attraction": False,
+                               "detail": ""}]}})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][1]
+    assert "category" not in item
+    assert item["detail"] == "招牌：龙抄手"  # 原样保留
+
+
+def test_planner_supplement_caches_and_skips_second_call(monkeypatch, tmp_path):
+    """同一景点补全结果按名称缓存：第二次行程不再调用补全 LLM。"""
+    cache_file = tmp_path / "details.json"
+    monkeypatch.setattr(planner, "_detail_cache_path", lambda: cache_file)
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""},
+                                {"name": "锦里古街", "note": ""}]}],
+            "summary": "x", "warnings": []}
+    detail = "锦里是成都武侯祠旁的仿古商业街，免费开放，建议游玩2-3小时。"
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": itin,
+        "景点补全": {"items": [{"name": "锦里古街", "is_attraction": True,
+                               "detail": detail}]}})
+    planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    assert len(fake.calls) == 2  # 第一次：行程 + 补全
+    assert cache_file.exists()
+    fake2 = FakeProvider(json_responses={"行程规划JSON": itin})
+    out = planner.planner_node(_state(), fake2)  # type: ignore[arg-type]
+    assert len(fake2.calls) == 1  # 第二次：缓存命中，无补全调用
+    assert out["itinerary"]["days"][0]["items"][1]["detail"] == detail
+
+
+def test_planner_supplement_tolerates_llm_failure(monkeypatch, tmp_path):
+    """补全 LLM 异常 → 条目保持原样，行程正常返回（不阻塞）。"""
+    monkeypatch.setattr(planner, "_detail_cache_path", lambda: tmp_path / "details.json")
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001", "note": ""},
+                                {"name": "锦里古街", "note": "逛古街", "detail": "老街"}]}],
+            "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={"行程规划JSON": itin})  # 无补全响应 → 抛异常被吞
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][1]
+    assert "category" not in item
+    assert item["detail"] == "老街"  # 原样
 
 
 def test_planner_prompt_requires_candidate_reference():
@@ -255,9 +331,10 @@ def test_planner_injects_top_candidate_after_two_zero_reference_rounds():
                           "items": [{"name": "点都德（示例）", "note": "午餐"}]}],
                 "summary": "x", "warnings": []}
     fake = FakeProvider(json_responses={"行程规划JSON": zero_ref,
-                                        "上一版行程没有引用": zero_ref})
+                                        "上一版行程没有引用": zero_ref,
+                                        "景点补全": {"items": []}})
     out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
-    assert len(fake.calls) == 2  # 重试照常
+    assert len(fake.calls) == 3  # 行程 + 纠正重试 + 补全（补全响应空 = 无景点）
     item = out["itinerary"]["days"][0]["items"][0]
     assert item["poi_id"] == "guangzhou-001"  # CANDIDATES[0]（广州塔）
     assert item["name"] == "广州塔"
