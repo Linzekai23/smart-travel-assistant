@@ -26,6 +26,14 @@ docs/      设计文档与里程碑计划
 scripts/    一键启动脚本（bash scripts/dev.sh）
 ```
 
+## 功能清单
+
+- 自然语言行程规划：目的地 / 天数 / 预算 / 偏好 → 多 Agent 协作（Supervisor / Analyst / Planner / Researcher / Budget），SSE 实时显示协作过程
+- 全国 34 个省级行政区著名景点检索（RAG：Chroma + BGE，省份-城市-景点三级粒度）
+- 天气查询、预算分配、对话式修改重排（保留上下文）与刷新后会话恢复
+- 行程地图：景点 / 餐厅 / 酒店三类配色打点
+- 餐厅/酒店为高德地图真实商家（地址/电话/照片，地图打点）；无高德 key 时自动降级为示例数据
+
 ## 快速开始
 
 ### 一键启动（推荐）
@@ -45,6 +53,7 @@ cd backend
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"     # 含 chromadb/transformers/torch 等 RAG 依赖
 export DEEPSEEK_API_KEY=sk-xxx          # DeepSeek 平台申请；配置后聊天功能可用（Git Bash；cmd 用 set）
+export AMAP_KEY=xxx                     # 高德开放平台 Web 服务 key，可选；缺失时餐厅/酒店为示例数据（Git Bash；cmd 用 set）
 # 首次运行需准备 RAG 知识库（三步）：
 .venv/Scripts/python -m app.rag.download_model   # 1. 下载 BGE 模型（ModelScope，约 95MB）
 .venv/Scripts/python -m app.rag.generate        # 2. 生成 34 省 POI 语料（DeepSeek 约 34 次调用）
