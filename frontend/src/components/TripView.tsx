@@ -22,6 +22,7 @@ export interface TripItem {
   lat?: number;
   lng?: number;
   category?: string;
+  city?: string;
 }
 
 export interface TripDay {
@@ -169,7 +170,7 @@ export default function TripView({ trip }: Props) {
                     </p>
                   )}
                   {(it.poi_id || it.category === "attraction") && (
-                    <AttractionImage name={it.name} />
+                    <AttractionImage name={it.name} city={it.city} />
                   )}
                 </div>
               ),

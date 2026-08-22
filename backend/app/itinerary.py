@@ -41,7 +41,7 @@ def enrich_itinerary(itinerary: dict, candidates: list[dict]) -> dict:
                 continue
             enriched = dict(item)
             # poi_id 一并附加（名称匹配的条目原本没有）——前端图片/地图渲染条件
-            for field in ("lat", "lng", "name", "category", "reason", "description", "poi_id"):
+            for field in ("lat", "lng", "name", "category", "reason", "description", "poi_id", "city"):
                 if cand.get(field) is not None:
                     enriched[field] = cand[field]
             # detail 兜底：LLM 未写详细介绍或写得太短（套话，如注入兜底条目）时

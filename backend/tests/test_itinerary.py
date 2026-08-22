@@ -28,6 +28,7 @@ def test_enrich_attaches_candidate_coords():
     assert item["lng"] == 113.3245
     assert item["name"] == "广州塔"        # 富化后 name 取自候选
     assert item["category"] == "attraction"
+    assert item["city"] == "广州"          # 城市用于图片搜索消歧
     assert item["reason"] == "夜景绝佳"
     assert item["description"] == "珠江畔地标。"
     assert item["note"] == "夜景"          # 原字段保留
