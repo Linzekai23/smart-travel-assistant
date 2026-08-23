@@ -74,6 +74,7 @@ interface BudgetRow {
   category: string;
   amount: number;
   note?: string;
+  pct?: number;
 }
 
 const budgetColumns: TableProps<BudgetRow>["columns"] = [
@@ -84,6 +85,13 @@ const budgetColumns: TableProps<BudgetRow>["columns"] = [
     dataIndex: "amount",
     align: "right",
     render: (v: number) => <span className="font-mono">¥{v}</span>,
+  },
+  {
+    title: "占比",
+    dataIndex: "pct",
+    align: "right",
+    width: 70,
+    render: (v: number) => <span className="text-slate-400">{v}%</span>,
   },
 ];
 
@@ -275,7 +283,11 @@ export default function TripView({ trip }: Props) {
             pagination={false}
             rowKey="key"
             columns={budgetColumns}
-            dataSource={budget.items.map((it, i) => ({ key: i, ...it }))}
+            dataSource={budget.items.map((it, i) => ({
+              key: i,
+              ...it,
+              pct: budget.total ? Math.round((it.amount / budget.total) * 100) : undefined,
+            }))}
             footer={
               budget.total != null
                 ? () => `合计 ¥${budget.total}`
@@ -286,10 +298,15 @@ export default function TripView({ trip }: Props) {
       ) : null}
 
       {/* 总结 + tips */}
-      {trip.summary || trip.tips?.length ? (
+      {trip.itinerary.summary || trip.summary || trip.tips?.length ? (
         <Card title="行程总结">
-          {trip.summary && (
-            <p className="text-sm text-slate-800">{trip.summary}</p>
+          {(trip.itinerary.summary || trip.summary) && (
+            <p className="text-sm leading-relaxed text-slate-800">
+              {trip.itinerary.summary || trip.summary}
+            </p>
+          )}
+          {trip.itinerary.summary && trip.summary && (
+            <p className="mt-2 text-xs text-slate-500">总体建议：{trip.summary}</p>
           )}
           {trip.tips?.length ? (
             <ul className="mt-2 space-y-1 text-sm">

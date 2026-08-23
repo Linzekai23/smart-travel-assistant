@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 
 from app import events
-from app.agents.budget import format_budget
 from app.agents.planner import format_itinerary
 from app.llm.deepseek import DeepSeekProvider
 
@@ -27,17 +26,17 @@ def format_supervisor_reply(
     summary: str = "",
     tips: list[str] | None = None,
 ) -> str:
-    """确定性拼装最终回复：行程 + 预算表 + 总体建议 + 提示 + 天气脚注。"""
+    """确定性拼装最终回复（对话框用）：行程概览 + 总体建议 + 提示 + 天气脚注。
+
+    预算表与详细介绍不进对话框（右侧面板渲染，避免信息过载）。"""
     parts = [format_itinerary(itinerary)]
-    budget_text = format_budget(budget_plan)
-    if budget_text:
-        parts.append(budget_text)
     if summary:
         parts.append(f"**总体建议**：{summary}")
     for tip in tips or []:
         if tip.strip():
             parts.append(f"💡 {tip.strip()}")
     reply = "\n\n".join(parts)
+    reply += "\n\n_（详细行程、预算分配与总结见右侧面板）_"
     if any(w.get("source") == "simulated" for w in weather):
         reply += "\n\n_（天气数据暂不可用，已用模拟数据，仅供参考）_"
     return reply

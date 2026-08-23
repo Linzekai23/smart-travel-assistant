@@ -169,13 +169,16 @@ def test_format_itinerary_includes_accommodation():
     assert "锦江区，近春熙路" in text          # 位置理由
     assert "到当日景点约 15-30 分钟车程" in text  # 通勤理由
     assert "中档，符合预算" in text             # 价格理由
-    assert "大堂现代、带健身房与自助早餐" in text  # 住宿环境
+    assert "大堂现代、带健身房与自助早餐" not in text  # 住宿详细介绍不进对话框
 
 
-def test_format_itinerary_includes_detail():
+def test_format_itinerary_omits_detail():
+    """聊天回复每条一行：景点/餐厅详细介绍不进对话框（右侧面板渲染）。"""
     text = planner.format_itinerary(ITINERARY)
-    assert "小蛮腰" in text and "> " in text     # 景点详细介绍
-    assert "招牌：虾饺、红米肠" in text           # 餐厅推荐美食
+    assert "广州塔" in text and "## " in text
+    assert "小蛮腰" not in text                # 景点详细介绍省略
+    assert "招牌：虾饺、红米肠" not in text      # 餐厅推荐美食省略
+    assert "行程总结" not in text               # 总结在右侧面板
 
 
 def test_planner_enriches_itinerary_with_candidate_coords():
@@ -470,3 +473,13 @@ def test_clean_itinerary_drops_duplicate_poi_id():
     ids = [it.get("poi_id") for d in itin["days"] for it in d["items"]]
     assert ids == ["amap-1", "amap-2", None]      # 第 2 天的重复引用被丢弃，示例条目保留
     assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-9"]
+
+
+def test_format_itinerary_strips_duplicate_jianyi():
+    """LLM 常输出"建议上午…"，拼装时去掉前缀避免"建议建议…"。"""
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                      "items": [{"name": "A", "suggested_time": "建议上午 9:00 前往"}]}],
+            "summary": "", "warnings": []}
+    text = planner.format_itinerary(itin)
+    assert "建议上午 9:00 前往" in text
+    assert "建议建议" not in text

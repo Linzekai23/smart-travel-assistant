@@ -41,7 +41,8 @@ def test_full_planning_flow():
     assert result["budget_plan"]["checked"] is True
     assert result["supervisor_summary"]["summary"] == "整体节奏合理。"
     assert result["last_reply"].startswith("## ")
-    assert "## 预算分配" in result["last_reply"]
+    assert "## 预算分配" not in result["last_reply"]  # 预算表只在右侧面板
+    assert "右侧面板" in result["last_reply"]
 
 
 def test_incomplete_request_ends_at_analyst():
