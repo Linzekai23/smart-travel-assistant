@@ -81,3 +81,16 @@ def test_format_supervisor_reply_skips_empty_budget():
     text = supervisor.format_supervisor_reply(ITINERARY, {"items": [], "total": None}, WEATHER, "不错", ["带伞"])
     assert "## 预算分配" not in text
     assert "**总体建议**：不错" in text
+
+
+def test_supervisor_filters_tips_duplicating_warnings():
+    """tips 与行程 warnings 高度重叠 → 丢弃，避免总结卡重复提醒（雷暴/预约回归）。"""
+    state = _state()
+    state["itinerary"]["warnings"] = ["第三天有雷暴，建议携带雨具", "熊猫基地需提前预约门票"]
+    fake = FakeProvider(json_responses={"汇总JSON": {
+        "summary": "OK。",
+        "tips": ["第三天有雷暴，备好雨具并减少户外活动", "熊猫基地需提前预约门票",
+                 "预算充足，可适当升级美食体验"],
+    }})
+    out = supervisor.supervisor_node(state, fake)  # type: ignore[arg-type]
+    assert out["supervisor_summary"]["tips"] == ["预算充足，可适当升级美食体验"]

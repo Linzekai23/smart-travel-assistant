@@ -5,7 +5,9 @@ LLM 只产出结构化 JSON；last_reply 由 format_supervisor_reply 确定性�
 """
 from __future__ import annotations
 
+import difflib
 import json
+import re
 
 from app import events
 from app.agents.planner import format_itinerary
@@ -16,7 +18,8 @@ SUPERVISOR_SYSTEM_PROMPT = """你是智能旅行助手的"主管"。查看行程
 {"summary": "对行程和预算的整体评价与建议，50 字以内", "tips": ["提示数组，每条 20 字以内，如 天气提醒/预算提醒/预约提醒"]}
 规则：
 - summary 客观精炼，不要重复行程细节
-- tips 1-3 条，优先天气与预算相关"""
+- tips 1-3 条，优先天气与预算相关
+- tips 不要重复行程 warnings 已包含的提醒（如雷暴/预约类）"""
 
 
 def format_supervisor_reply(
@@ -42,6 +45,24 @@ def format_supervisor_reply(
     return reply
 
 
+def _dedupe_tips(tips: list[str], warnings: list[str]) -> list[str]:
+    """丢弃与行程 warnings 高度重叠的 tips（如"雷暴备雨具"重复提醒），
+    避免总结卡/对话框出现两条近似相同的提醒。"""
+    def norm(s: str) -> str:
+        return re.sub(r"[\s，。！？、；：,.!?;:]", "", s)
+
+    out = []
+    for tip in tips:
+        t = norm(tip)
+        if not t or any(
+            difflib.SequenceMatcher(None, t, norm(w)).ratio() >= 0.35
+            for w in warnings
+        ):
+            continue
+        out.append(tip)
+    return out
+
+
 def supervisor_node(state: dict, llm: DeepSeekProvider) -> dict:
     events.publish({"type": "agent_status", "data": {"agent": "supervisor", "status": "start"}})
     summary, tips = "", []
@@ -64,6 +85,8 @@ def supervisor_node(state: dict, llm: DeepSeekProvider) -> dict:
             for t in (parsed.get("tips") or [])
             if isinstance(t, str) and t.strip()
         ][:5]
+        tips = _dedupe_tips(
+            tips, (state.get("itinerary") or {}).get("warnings") or [])
     except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
         summary, tips = "", []  # LLM 失败 → 确定性兜底拼装
 
