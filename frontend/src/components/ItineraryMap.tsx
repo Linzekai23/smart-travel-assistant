@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import { BRAND } from "../theme";
@@ -52,17 +52,45 @@ function FitBounds({ points }: { points: MapPoint[] }) {
   return null;
 }
 
+export interface MapFocus {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+/** 点击条目定位：飞行到目标点并打开对应标记的弹窗（focusNonce 变化可重复触发同一目标）。 */
+function FlyTo({
+  focus,
+  nonce,
+  markers,
+}: {
+  focus: MapFocus | null | undefined;
+  nonce: number;
+  markers: React.MutableRefObject<Map<string, L.Marker>>;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!focus) return;
+    map.flyTo([focus.lat, focus.lng], 15, { duration: 1 });
+    markers.current.get(`${focus.name}@${focus.lat},${focus.lng}`)?.openPopup();
+  }, [focus, nonce, map, markers]);
+  return null;
+}
+
 interface Props {
   days: DayGeo[];
   activeDay: number | "all";
+  focus?: MapFocus | null;
+  focusNonce?: number;
 }
 
-export default function ItineraryMap({ days, activeDay }: Props) {
+export default function ItineraryMap({ days, activeDay, focus, focusNonce = 0 }: Props) {
   const visibleDays = useMemo(
     () => (activeDay === "all" ? days : days.filter((d) => d.day === activeDay)),
     [days, activeDay],
   );
   const points = useMemo(() => visibleDays.flatMap((d) => d.points), [visibleDays]);
+  const markersRef = useRef(new Map<string, L.Marker>());
 
   return (
     <div className="relative h-full w-full">
@@ -74,12 +102,17 @@ export default function ItineraryMap({ days, activeDay }: Props) {
           attribution="© 高德地图"
         />
         <FitBounds points={points} />
+        <FlyTo focus={focus} nonce={focusNonce} markers={markersRef} />
         {visibleDays.map((d) =>
           d.points.map((p, i) => (
             <Marker
               key={`${d.day}-${i}`}
               position={[p.lat, p.lng]}
               icon={makeIcon(d.day, i, p.category)}
+              ref={(m) => {
+                if (m) markersRef.current.set(`${p.name}@${p.lat},${p.lng}`, m);
+                else markersRef.current.delete(`${p.name}@${p.lat},${p.lng}`);
+              }}
             >
               <Popup>
                 <div className="text-xs">

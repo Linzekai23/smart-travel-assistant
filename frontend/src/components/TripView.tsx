@@ -9,7 +9,7 @@ import {
   HomeOutlined,
 } from "@ant-design/icons";
 import AttractionImage from "./AttractionImage";
-import ItineraryMap, { type DayGeo } from "./ItineraryMap";
+import ItineraryMap, { type DayGeo, type MapFocus } from "./ItineraryMap";
 
 export interface TripItem {
   name: string;
@@ -102,6 +102,13 @@ interface Props {
 export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
+  // 点击条目 → 地图飞行定位（nonce 保证重复点击同一目标也能重新触发）
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const locate = (name: string, lat: number, lng: number) => {
+    setFocus({ name, lat, lng });
+    setFocusNonce((n) => n + 1);
+  };
 
   // 带坐标的条目上地图（景点 + 高德真实餐厅/酒店 + 富化的住宿蓝点）
   const geoDays: DayGeo[] = useMemo(
@@ -170,10 +177,12 @@ export default function TripView({ trip }: Props) {
       <Tabs activeKey={active} onChange={setActiveDay} items={tabItems} />
 
       {/* 地图：保持纯 div 容器（leaflet 需要零内边距，不包 Card） */}
-      <div className="h-[40vh] min-h-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="h-[55vh] min-h-96 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <ItineraryMap
           days={geoDays}
           activeDay={active === "all" ? "all" : Number(active)}
+          focus={focus}
+          focusNonce={focusNonce}
         />
       </div>
 
@@ -194,7 +203,24 @@ export default function TripView({ trip }: Props) {
             items={(d.items ?? []).map((it) => ({
               children: (
                 <div>
-                  <span className="text-slate-800">{it.name}</span>
+                  <span
+                    className={
+                      typeof it.lat === "number" && typeof it.lng === "number"
+                        ? "cursor-pointer text-slate-800 hover:text-brand"
+                        : "text-slate-800"
+                    }
+                    title="在地图上定位"
+                    onClick={() => {
+                      if (typeof it.lat === "number" && typeof it.lng === "number") {
+                        locate(it.name, it.lat, it.lng);
+                      }
+                    }}
+                  >
+                    {it.name}
+                  </span>
+                  {typeof it.lat === "number" && typeof it.lng === "number" && (
+                    <EnvironmentOutlined className="ml-1 text-xs text-brand/60" />
+                  )}
                   {it.note && (
                     <span className="ml-1 text-xs text-slate-500">
                       （{it.note}）
@@ -238,7 +264,21 @@ export default function TripView({ trip }: Props) {
               <li key={i} className="text-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <HomeOutlined className="text-brand" />
-                  <span className="font-medium text-slate-800">{a.name}</span>
+                  <span
+                    className={
+                      typeof a.lat === "number" && typeof a.lng === "number"
+                        ? "cursor-pointer font-medium text-slate-800 hover:text-brand"
+                        : "font-medium text-slate-800"
+                    }
+                    title="在地图上定位"
+                    onClick={() => {
+                      if (typeof a.lat === "number" && typeof a.lng === "number") {
+                        locate(a.name, a.lat, a.lng);
+                      }
+                    }}
+                  >
+                    {a.name}
+                  </span>
                   {a.days?.length ? (
                     <Tag>{`第${a.days.join("、")}天`}</Tag>
                   ) : null}
