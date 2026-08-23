@@ -87,7 +87,7 @@ export default function ItineraryMap({ days, activeDay }: Props) {
                   {p.address && <p>{p.address}</p>}
                   {p.suggested_time && (
                     <p>
-                      建议{p.suggested_time}
+                      建议{p.suggested_time.replace(/^建议/, "")}
                       {p.time_reason ? `（${p.time_reason}）` : ""}
                     </p>
                   )}

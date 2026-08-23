@@ -475,11 +475,27 @@ def test_clean_itinerary_drops_duplicate_poi_id():
     assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-9"]
 
 
-def test_format_itinerary_strips_duplicate_jianyi():
-    """LLM 常输出"建议上午…"，拼装时去掉前缀避免"建议建议…"。"""
+def test_format_itinerary_omits_time_hints_and_warnings():
+    """聊天回复每条一行只有名称与备注：时段/理由/警示不进对话框（右侧面板渲染）。"""
     itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
-                      "items": [{"name": "A", "suggested_time": "建议上午 9:00 前往"}]}],
-            "summary": "", "warnings": []}
+                      "items": [{"name": "A", "suggested_time": "建议上午 9:00 前往",
+                                 "time_reason": "人少", "note": "必去"}]}],
+            "summary": "", "warnings": ["雨天带伞"]}
     text = planner.format_itinerary(itin)
-    assert "建议上午 9:00 前往" in text
-    assert "建议建议" not in text
+    assert "- **A**（必去）" in text
+    assert "上午 9:00" not in text and "人少" not in text
+    assert "雨天带伞" not in text and "⚠️" not in text
+
+
+def test_clean_itinerary_drops_hotel_items_from_days():
+    """LLM 把候选酒店塞进每天条目（太成宾馆/广都国际酒店回归）→ 丢弃，住宿区不受影响。"""
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                      "items": [{"name": "宽窄巷子", "poi_id": "cd-1", "note": ""},
+                                {"name": "太成宾馆", "poi_id": "amap-H1", "note": ""},
+                                {"name": "世代锦江国际酒店", "note": ""}]}],
+            "accommodation": [{"name": "太成宾馆", "poi_id": "amap-H1", "days": [1]}],
+            "summary": "x", "warnings": []}
+    planner._clean_itinerary(itin, {"cd-1", "amap-H1"},
+                             hotel_ids={"amap-H1"}, hotel_names={"太成宾馆", "世代锦江国际酒店"})
+    assert [i["name"] for i in itin["days"][0]["items"]] == ["宽窄巷子"]
+    assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-H1"]  # 住宿区保留

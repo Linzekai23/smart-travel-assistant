@@ -203,7 +203,7 @@ export default function TripView({ trip }: Props) {
                   {it.suggested_time && (
                     <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                       <ClockCircleOutlined className="text-brand" />
-                      <span>建议{it.suggested_time}</span>
+                      <span>建议{it.suggested_time.replace(/^建议/, "")}</span>
                       {it.time_reason && <span>（{it.time_reason}）</span>}
                     </div>
                   )}
@@ -297,8 +297,8 @@ export default function TripView({ trip }: Props) {
         </Card>
       ) : null}
 
-      {/* 总结 + tips */}
-      {trip.itinerary.summary || trip.summary || trip.tips?.length ? (
+      {/* 总结 + tips + 警示 */}
+      {trip.itinerary.summary || trip.summary || trip.tips?.length || trip.itinerary.warnings?.length ? (
         <Card title="行程总结">
           {(trip.itinerary.summary || trip.summary) && (
             <p className="text-sm leading-relaxed text-slate-800">
@@ -308,6 +308,15 @@ export default function TripView({ trip }: Props) {
           {trip.itinerary.summary && trip.summary && (
             <p className="mt-2 text-xs text-slate-500">总体建议：{trip.summary}</p>
           )}
+          {trip.itinerary.warnings?.length ? (
+            <ul className="mt-2 space-y-1 text-sm">
+              {trip.itinerary.warnings.map((w, i) => (
+                <li key={i} className="text-amber-600">
+                  ⚠️ {w}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {trip.tips?.length ? (
             <ul className="mt-2 space-y-1 text-sm">
               {trip.tips.map((t, i) => (
