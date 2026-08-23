@@ -32,7 +32,7 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
       ]
     }
   ],
-  "summary": "整体行程总结，50 字以内",
+  "summary": "整体行程总结 100-150 字：行程亮点 2-3 句（必去景点与体验）、美食安排（推荐菜/店）、住宿与交通建议、注意事项各一句",
   "warnings": ["提示，如 需要提前预约/雨天备选，没有则为空数组"],
   "accommodation": [{"name": "候选酒店名", "poi_id": "候选酒店的 poi_id（有候选酒店时必须引用）", "days": [1, 2], "location_note": "酒店所在区域/附近景点，如 锦江区，近春熙路", "commute_note": "到景点通勤，如 到当日景点约 15-30 分钟车程", "price_note": "价格档位与预算符合性，如 中档，符合预算", "detail": "酒店环境与设施介绍，如 大堂现代、带健身房与自助早餐，近地铁口，10-30 字"}]
 }
@@ -43,6 +43,8 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 餐厅/酒店条目必须从候选餐厅/酒店中选取并引用其 poi_id（真实商家）；仅当候选餐厅/酒店不足时才可编造并在名称后标注（示例）且不填 poi_id
+- 同一 poi_id 全程只能引用一次（每家餐厅/酒店/景点只出现一次，不要多天重复安排同一家）
+- 酒店条目只能放进 accommodation 数组，不要作为每天 items 的条目（items 只放景点/餐饮/购物点）
 - 住宿推荐集中安排：优先选景点集中的区域住一家、覆盖整个行程（days 列全程天数），通勤方便；仅当某天景点与主住宿区距离确实较远（如跨市郊景区）才换第 2 家并在 commute_note 说明原因；住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
@@ -77,7 +79,8 @@ def build_candidate_context(candidates: list[dict]) -> str:
 
 
 def format_itinerary(itinerary: dict) -> str:
-    """把结构化行程转成中文 markdown 文本（确定性，不依赖 LLM）。"""
+    """把结构化行程转成极简中文 markdown（聊天回复用：每条一行只有名称与备注；
+    时段/理由/详细介绍/警示都渲染在右侧面板，避免对话框信息过载）。"""
     lines: list[str] = []
     for day in itinerary.get("days") or []:
         lines.append(f"## 第 {day['day']} 天：{day.get('title', '')}")
@@ -86,20 +89,8 @@ def format_itinerary(itinerary: dict) -> str:
             lines.append(f"> 天气：{note}")
         for item in day.get("items", []):
             name = item["name"]
-            bits = []
-            when = item.get("suggested_time")
-            if when:
-                bits.append(f"建议{when}")
-            time_reason = item.get("time_reason")
-            if time_reason:
-                bits.append(f"理由：{time_reason}")
             note_text = item.get("note")
-            if note_text:
-                bits.append(note_text)
-            lines.append(f"- **{name}**" + (f"（{'；'.join(bits)}）" if bits else ""))
-            detail = item.get("detail")
-            if detail:
-                lines.append(f"> {detail}")
+            lines.append(f"- **{name}**" + (f"（{note_text}）" if note_text else ""))
         lines.append("")
     for acc in itinerary.get("accommodation") or []:
         if not lines or lines[-1] != "":
@@ -112,12 +103,6 @@ def format_itinerary(itinerary: dict) -> str:
             if acc.get(key):
                 bits.append(acc[key])
         lines.append("- 🏨 " + "；".join(bits))
-        if acc.get("detail"):
-            lines.append(f"> {acc['detail']}")
-    if itinerary.get("summary"):
-        lines.append(f"**行程总结**：{itinerary['summary']}")
-    for w in itinerary.get("warnings", []):
-        lines.append(f"⚠️ {w}")
     return "\n".join(lines).strip()
 
 
@@ -179,16 +164,38 @@ def _save_detail_cache(cache: dict) -> None:
         json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def _clean_itinerary(itinerary: dict, candidate_ids: set) -> None:
-    """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）。"""
+def _clean_itinerary(itinerary: dict, candidate_ids: set,
+                     hotel_ids: set | None = None, hotel_names: set | None = None) -> None:
+    """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）；
+    同一 poi_id 全程只保留第一次出现（LLM 会同一餐厅连选多天，如丽江塘钓鱼×5）；
+    引用候选酒店的条目丢弃（LLM 常把酒店当景点塞进每天 items，如太成宾馆）。"""
+    seen: set[str] = set()
     for day in itinerary.get("days") or []:
         kept = []
         for item in day.get("items", []):
             pid = item.get("poi_id")
             if pid is not None and pid not in candidate_ids:
                 continue  # 编造的 POI 直接丢弃
+            if pid and pid in (hotel_ids or set()):
+                continue  # 酒店引用误入每天条目（酒店只进 accommodation）
+            if not pid and str(item.get("name") or "").strip() in (hotel_names or set()):
+                continue  # 无 id 但名称是候选酒店（模型抄名不抄 id）
+            if pid and pid in seen:
+                continue  # 重复引用同一 POI
+            if pid:
+                seen.add(pid)
             kept.append(item)
         day["items"] = kept
+    if itinerary.get("accommodation") is not None:
+        kept_acc = []
+        for a in itinerary["accommodation"]:
+            pid = a.get("poi_id")
+            if pid and pid in seen:
+                continue
+            if pid:
+                seen.add(pid)
+            kept_acc.append(a)
+        itinerary["accommodation"] = kept_acc
 
 
 def _has_candidate_reference(itinerary: dict, attraction_ids: set) -> bool:
@@ -259,6 +266,9 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
     candidate_ids = {p.get("poi_id") for p in candidates if p.get("poi_id")}
     attraction_ids = {p.get("poi_id") for p in candidates
                       if p.get("category") == "attraction" and p.get("poi_id")}
+    hotel_ids = {p.get("poi_id") for p in candidates
+                 if p.get("category") == "hotel" and p.get("poi_id")}
+    hotel_names = {p.get("name") for p in candidates if p.get("category") == "hotel"}
     itinerary = {}
     for attempt in range(2):
         try:
@@ -266,7 +276,7 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
             itinerary = {}
             break  # LLM 异常走既有降级路径（days-None 分支）
-        _clean_itinerary(itinerary, candidate_ids)
+        _clean_itinerary(itinerary, candidate_ids, hotel_ids, hotel_names)
         if not itinerary.get("days") or _has_candidate_reference(itinerary, attraction_ids):
             break
         # 零引用兜底：追加纠正指令重试一次（无引用 = 地图空图，M5 冒烟实证 LLM 会

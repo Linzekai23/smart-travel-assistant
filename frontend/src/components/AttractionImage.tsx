@@ -50,14 +50,14 @@ export default function AttractionImage({
           loading="lazy"
           referrerPolicy="no-referrer"
           onError={() => setFailedKey(key)}
-          className="h-36 w-full object-cover"
+          className="h-48 w-full object-cover brightness-110 saturate-125 contrast-105"
         />
       ) : failed ? (
-        <div className="flex h-36 w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
+        <div className="flex h-48 w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
           图片加载失败
         </div>
       ) : (
-        <div className="flex h-36 w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
+        <div className="flex h-48 w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
           图片加载中…
         </div>
       )}

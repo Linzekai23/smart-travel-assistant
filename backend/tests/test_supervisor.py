@@ -40,18 +40,19 @@ def test_supervisor_reply_contains_all_sections():
     assert out["supervisor_summary"]["summary"] == "整体节奏合理，预算充裕。"
     reply = out["last_reply"]
     assert "第 1 天" in reply          # 行程 markdown
-    assert "## 预算分配" in reply      # 预算表 markdown
+    assert "## 预算分配" not in reply  # 预算表只在右侧面板
+    assert "右侧面板" in reply         # 面板指引
     assert "**总体建议**" in reply     # summary
     assert "💡" in reply               # tips
     assert "模拟数据" not in reply     # open-meteo 无脚注
 
 
 def test_supervisor_llm_failure_fallback():
-    """LLM 未配置响应（抛异常）→ 纯确定性拼装，行程与预算仍在。"""
+    """LLM 未配置响应（抛异常）→ 纯确定性拼装，行程仍在（预算表在右侧面板）。"""
     out = supervisor.supervisor_node(_state(), FakeProvider())  # type: ignore[arg-type]
     assert out["supervisor_summary"] == {"summary": "", "tips": []}
     assert "第 1 天" in out["last_reply"]
-    assert "## 预算分配" in out["last_reply"]
+    assert "## 预算分配" not in out["last_reply"]
 
 
 def test_supervisor_simulated_weather_footnote():
@@ -80,3 +81,16 @@ def test_format_supervisor_reply_skips_empty_budget():
     text = supervisor.format_supervisor_reply(ITINERARY, {"items": [], "total": None}, WEATHER, "不错", ["带伞"])
     assert "## 预算分配" not in text
     assert "**总体建议**：不错" in text
+
+
+def test_supervisor_filters_tips_duplicating_warnings():
+    """tips 与行程 warnings 高度重叠 → 丢弃，避免总结卡重复提醒（雷暴/预约回归）。"""
+    state = _state()
+    state["itinerary"]["warnings"] = ["第三天有雷暴，建议携带雨具", "熊猫基地需提前预约门票"]
+    fake = FakeProvider(json_responses={"汇总JSON": {
+        "summary": "OK。",
+        "tips": ["第三天有雷暴，备好雨具并减少户外活动", "熊猫基地需提前预约门票",
+                 "预算充足，可适当升级美食体验"],
+    }})
+    out = supervisor.supervisor_node(state, fake)  # type: ignore[arg-type]
+    assert out["supervisor_summary"]["tips"] == ["预算充足，可适当升级美食体验"]

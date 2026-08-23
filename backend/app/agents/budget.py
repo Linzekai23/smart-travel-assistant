@@ -14,7 +14,7 @@ BUDGET_CATEGORIES = ["住宿", "交通", "餐饮", "门票", "其他"]
 BUDGET_SYSTEM_PROMPT = """你是智能旅行助手的"预算官"。根据用户总预算、天数与偏好，把预算分配到固定类别。
 只输出 JSON 对象（不要 markdown、不要其他文字），schema：
 {"items": [
-  {"category": "住宿|交通|餐饮|门票|其他", "amount": 金额整数, "note": "一句话说明，10 字内"}
+  {"category": "住宿|交通|餐饮|门票|其他", "amount": 金额整数, "note": "说明 20-30 字，含估算依据，如 2人×3晚每晚约400 / 往返高铁二等座 / 门票与讲解"}
 ]}
 规则：
 - 类别必须取自：住宿、交通、餐饮、门票、其他，每个类别最多一条
@@ -56,7 +56,7 @@ def _clean_items(items: list, budget_cny: int) -> list[dict]:
             continue
         seen.add(category)
         out.append({"category": category, "amount": amount,
-                    "note": str(it.get("note", "") or "").strip()[:20]})
+                    "note": str(it.get("note", "") or "").strip()[:40]})
     return out or _default_items(budget_cny)
 
 

@@ -169,13 +169,16 @@ def test_format_itinerary_includes_accommodation():
     assert "锦江区，近春熙路" in text          # 位置理由
     assert "到当日景点约 15-30 分钟车程" in text  # 通勤理由
     assert "中档，符合预算" in text             # 价格理由
-    assert "大堂现代、带健身房与自助早餐" in text  # 住宿环境
+    assert "大堂现代、带健身房与自助早餐" not in text  # 住宿详细介绍不进对话框
 
 
-def test_format_itinerary_includes_detail():
+def test_format_itinerary_omits_detail():
+    """聊天回复每条一行：景点/餐厅详细介绍不进对话框（右侧面板渲染）。"""
     text = planner.format_itinerary(ITINERARY)
-    assert "小蛮腰" in text and "> " in text     # 景点详细介绍
-    assert "招牌：虾饺、红米肠" in text           # 餐厅推荐美食
+    assert "广州塔" in text and "## " in text
+    assert "小蛮腰" not in text                # 景点详细介绍省略
+    assert "招牌：虾饺、红米肠" not in text      # 餐厅推荐美食省略
+    assert "行程总结" not in text               # 总结在右侧面板
 
 
 def test_planner_enriches_itinerary_with_candidate_coords():
@@ -451,3 +454,48 @@ def test_planner_restaurant_only_reference_still_injects_attraction(monkeypatch)
     assert items[1]["poi_id"] == "amap-B0FFH1"     # 餐厅条目保留（放行）
     # 行程 + 纠正重试：示例景点经 enrich 名称匹配获 poi_id（非语料外），无需补全调用
     assert len(fake.calls) == 2
+
+
+def test_clean_itinerary_drops_duplicate_poi_id():
+    """同一 poi_id 全程只保留第一次出现（LLM 同一餐厅连选多天 → "丽江塘钓鱼"×5 回归）。"""
+    itin = {"days": [
+        {"day": 1, "title": "x", "weather_note": "",
+         "items": [{"name": "A", "poi_id": "amap-1", "note": "午餐"},
+                   {"name": "A", "poi_id": "amap-1", "note": "晚餐"},
+                   {"name": "B", "poi_id": "amap-2", "note": "午餐"}]},
+        {"day": 2, "title": "x", "weather_note": "",
+         "items": [{"name": "A", "poi_id": "amap-1", "note": "午餐"},
+                   {"name": "B（示例）", "note": "午餐"}]}],
+        "accommodation": [{"name": "H1", "poi_id": "amap-9", "days": [1, 2]},
+                          {"name": "H2", "poi_id": "amap-9", "days": [1, 2]}],
+        "summary": "x", "warnings": []}
+    planner._clean_itinerary(itin, {"amap-1", "amap-2", "amap-9"})
+    ids = [it.get("poi_id") for d in itin["days"] for it in d["items"]]
+    assert ids == ["amap-1", "amap-2", None]      # 第 2 天的重复引用被丢弃，示例条目保留
+    assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-9"]
+
+
+def test_format_itinerary_omits_time_hints_and_warnings():
+    """聊天回复每条一行只有名称与备注：时段/理由/警示不进对话框（右侧面板渲染）。"""
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                      "items": [{"name": "A", "suggested_time": "建议上午 9:00 前往",
+                                 "time_reason": "人少", "note": "必去"}]}],
+            "summary": "", "warnings": ["雨天带伞"]}
+    text = planner.format_itinerary(itin)
+    assert "- **A**（必去）" in text
+    assert "上午 9:00" not in text and "人少" not in text
+    assert "雨天带伞" not in text and "⚠️" not in text
+
+
+def test_clean_itinerary_drops_hotel_items_from_days():
+    """LLM 把候选酒店塞进每天条目（太成宾馆/广都国际酒店回归）→ 丢弃，住宿区不受影响。"""
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                      "items": [{"name": "宽窄巷子", "poi_id": "cd-1", "note": ""},
+                                {"name": "太成宾馆", "poi_id": "amap-H1", "note": ""},
+                                {"name": "世代锦江国际酒店", "note": ""}]}],
+            "accommodation": [{"name": "太成宾馆", "poi_id": "amap-H1", "days": [1]}],
+            "summary": "x", "warnings": []}
+    planner._clean_itinerary(itin, {"cd-1", "amap-H1"},
+                             hotel_ids={"amap-H1"}, hotel_names={"太成宾馆", "世代锦江国际酒店"})
+    assert [i["name"] for i in itin["days"][0]["items"]] == ["宽窄巷子"]
+    assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-H1"]  # 住宿区保留

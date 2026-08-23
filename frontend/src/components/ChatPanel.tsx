@@ -7,6 +7,7 @@ import {
   SendOutlined,
 } from "@ant-design/icons";
 import { BRAND } from "../theme";
+import AgentWorkflow from "./AgentWorkflow";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -95,9 +96,12 @@ export default function ChatPanel({ messages, sending, onSend }: Props) {
                   icon={<RobotOutlined />}
                   style={{ backgroundColor: BRAND }}
                 />
-                <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-3.5 py-2.5 shadow-sm">
-                  <Spin size="small" />
-                  <span className="text-xs text-slate-400">正在规划行程…</span>
+                <div>
+                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-3.5 py-2.5 shadow-sm">
+                    <Spin size="small" />
+                    <span className="text-xs text-slate-400">正在规划行程…</span>
+                  </div>
+                  <AgentWorkflow key={messages.length} />
                 </div>
               </div>
             )}

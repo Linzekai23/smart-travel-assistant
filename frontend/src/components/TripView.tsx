@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Card, Table, Tabs, Tag, Timeline } from "antd";
 import type { TableProps } from "antd";
 import {
@@ -7,10 +7,9 @@ import {
   CloudOutlined,
   EnvironmentOutlined,
   HomeOutlined,
-  PhoneOutlined,
 } from "@ant-design/icons";
 import AttractionImage from "./AttractionImage";
-import ItineraryMap, { type DayGeo } from "./ItineraryMap";
+import ItineraryMap, { type DayGeo, type MapFocus } from "./ItineraryMap";
 
 export interface TripItem {
   name: string;
@@ -75,6 +74,7 @@ interface BudgetRow {
   category: string;
   amount: number;
   note?: string;
+  pct?: number;
 }
 
 const budgetColumns: TableProps<BudgetRow>["columns"] = [
@@ -86,6 +86,13 @@ const budgetColumns: TableProps<BudgetRow>["columns"] = [
     align: "right",
     render: (v: number) => <span className="font-mono">¥{v}</span>,
   },
+  {
+    title: "占比",
+    dataIndex: "pct",
+    align: "right",
+    width: 70,
+    render: (v: number) => <span className="text-slate-400">{v}%</span>,
+  },
 ];
 
 interface Props {
@@ -95,6 +102,15 @@ interface Props {
 export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
+  // 点击条目 → 视口滚到地图 + 地图飞行定位（nonce 保证重复点击同一目标也能重新触发）
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const locate = (name: string, lat: number, lng: number) => {
+    mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setFocus({ name, lat, lng });
+    setFocusNonce((n) => n + 1);
+  };
 
   // 带坐标的条目上地图（景点 + 高德真实餐厅/酒店 + 富化的住宿蓝点）
   const geoDays: DayGeo[] = useMemo(
@@ -163,10 +179,15 @@ export default function TripView({ trip }: Props) {
       <Tabs activeKey={active} onChange={setActiveDay} items={tabItems} />
 
       {/* 地图：保持纯 div 容器（leaflet 需要零内边距，不包 Card） */}
-      <div className="h-[40vh] min-h-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div
+        ref={mapRef}
+        className="h-[55vh] min-h-96 scroll-mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      >
         <ItineraryMap
           days={geoDays}
           activeDay={active === "all" ? "all" : Number(active)}
+          focus={focus}
+          focusNonce={focusNonce}
         />
       </div>
 
@@ -187,7 +208,24 @@ export default function TripView({ trip }: Props) {
             items={(d.items ?? []).map((it) => ({
               children: (
                 <div>
-                  <span className="text-slate-800">{it.name}</span>
+                  <span
+                    className={
+                      typeof it.lat === "number" && typeof it.lng === "number"
+                        ? "cursor-pointer text-slate-800 hover:text-brand"
+                        : "text-slate-800"
+                    }
+                    title="在地图上定位"
+                    onClick={() => {
+                      if (typeof it.lat === "number" && typeof it.lng === "number") {
+                        locate(it.name, it.lat, it.lng);
+                      }
+                    }}
+                  >
+                    {it.name}
+                  </span>
+                  {typeof it.lat === "number" && typeof it.lng === "number" && (
+                    <EnvironmentOutlined className="ml-1 text-xs text-brand/60" />
+                  )}
                   {it.note && (
                     <span className="ml-1 text-xs text-slate-500">
                       （{it.note}）
@@ -196,24 +234,16 @@ export default function TripView({ trip }: Props) {
                   {it.suggested_time && (
                     <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                       <ClockCircleOutlined className="text-brand" />
-                      <span>建议{it.suggested_time}</span>
+                      <span>建议{it.suggested_time.replace(/^建议/, "")}</span>
                       {it.time_reason && <span>（{it.time_reason}）</span>}
                     </div>
                   )}
-                  {(it.address || it.tel) && (
+                  {it.address && (
                     <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
-                      {it.address && (
-                        <span>
-                          <EnvironmentOutlined className="mr-0.5 text-brand" />
-                          {it.address}
-                        </span>
-                      )}
-                      {it.tel && (
-                        <span>
-                          <PhoneOutlined className="mr-0.5 text-brand" />
-                          {it.tel}
-                        </span>
-                      )}
+                      <span>
+                        <EnvironmentOutlined className="mr-0.5 text-brand" />
+                        {it.address}
+                      </span>
                     </div>
                   )}
                   {it.detail && (
@@ -239,36 +269,40 @@ export default function TripView({ trip }: Props) {
               <li key={i} className="text-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <HomeOutlined className="text-brand" />
-                  <span className="font-medium text-slate-800">{a.name}</span>
+                  <span
+                    className={
+                      typeof a.lat === "number" && typeof a.lng === "number"
+                        ? "cursor-pointer font-medium text-slate-800 hover:text-brand"
+                        : "font-medium text-slate-800"
+                    }
+                    title="在地图上定位"
+                    onClick={() => {
+                      if (typeof a.lat === "number" && typeof a.lng === "number") {
+                        locate(a.name, a.lat, a.lng);
+                      }
+                    }}
+                  >
+                    {a.name}
+                  </span>
                   {a.days?.length ? (
                     <Tag>{`第${a.days.join("、")}天`}</Tag>
                   ) : null}
                 </div>
-                {(a.address || a.tel) && (
+                {a.address && (
                   <div className="mt-1 flex flex-wrap gap-x-3 pl-6 text-xs text-slate-500">
-                    {a.address && (
-                      <span>
-                        <EnvironmentOutlined className="mr-0.5 text-brand" />
-                        {a.address}
-                      </span>
-                    )}
-                    {a.tel && (
-                      <span>
-                        <PhoneOutlined className="mr-0.5 text-brand" />
-                        {a.tel}
-                      </span>
-                    )}
+                    <span>
+                      <EnvironmentOutlined className="mr-0.5 text-brand" />
+                      {a.address}
+                    </span>
                   </div>
                 )}
-                {a.photo_url && (
-                  <div className="pl-6">
-                    <AttractionImage
-                      name={a.name}
-                      city={a.city}
-                      photoUrl={a.photo_url}
-                    />
-                  </div>
-                )}
+                <div className="pl-6">
+                  <AttractionImage
+                    name={a.name}
+                    city={a.city}
+                    photoUrl={a.photo_url}
+                  />
+                </div>
                 {(a.location_note ||
                   a.commute_note ||
                   a.price_note ||
@@ -294,7 +328,11 @@ export default function TripView({ trip }: Props) {
             pagination={false}
             rowKey="key"
             columns={budgetColumns}
-            dataSource={budget.items.map((it, i) => ({ key: i, ...it }))}
+            dataSource={budget.items.map((it, i) => ({
+              key: i,
+              ...it,
+              pct: budget.total ? Math.round((it.amount / budget.total) * 100) : undefined,
+            }))}
             footer={
               budget.total != null
                 ? () => `合计 ¥${budget.total}`
@@ -304,12 +342,26 @@ export default function TripView({ trip }: Props) {
         </Card>
       ) : null}
 
-      {/* 总结 + tips */}
-      {trip.summary || trip.tips?.length ? (
+      {/* 总结 + tips + 警示 */}
+      {trip.itinerary.summary || trip.summary || trip.tips?.length || trip.itinerary.warnings?.length ? (
         <Card title="行程总结">
-          {trip.summary && (
-            <p className="text-sm text-slate-800">{trip.summary}</p>
+          {(trip.itinerary.summary || trip.summary) && (
+            <p className="text-sm leading-relaxed text-slate-800">
+              {trip.itinerary.summary || trip.summary}
+            </p>
           )}
+          {trip.itinerary.summary && trip.summary && (
+            <p className="mt-2 text-xs text-slate-500">总体建议：{trip.summary}</p>
+          )}
+          {trip.itinerary.warnings?.length ? (
+            <ul className="mt-2 space-y-1 text-sm">
+              {trip.itinerary.warnings.map((w, i) => (
+                <li key={i} className="text-amber-600">
+                  ⚠️ {w}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {trip.tips?.length ? (
             <ul className="mt-2 space-y-1 text-sm">
               {trip.tips.map((t, i) => (
