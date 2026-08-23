@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Card, Table, Tabs, Tag, Timeline } from "antd";
 import type { TableProps } from "antd";
 import {
@@ -102,10 +102,12 @@ interface Props {
 export default function TripView({ trip }: Props) {
   const days = trip.itinerary.days ?? [];
   const [activeDay, setActiveDay] = useState<string>("all");
-  // 点击条目 → 地图飞行定位（nonce 保证重复点击同一目标也能重新触发）
+  // 点击条目 → 视口滚到地图 + 地图飞行定位（nonce 保证重复点击同一目标也能重新触发）
   const [focus, setFocus] = useState<MapFocus | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
+  const mapRef = useRef<HTMLDivElement>(null);
   const locate = (name: string, lat: number, lng: number) => {
+    mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     setFocus({ name, lat, lng });
     setFocusNonce((n) => n + 1);
   };
@@ -177,7 +179,10 @@ export default function TripView({ trip }: Props) {
       <Tabs activeKey={active} onChange={setActiveDay} items={tabItems} />
 
       {/* 地图：保持纯 div 容器（leaflet 需要零内边距，不包 Card） */}
-      <div className="h-[55vh] min-h-96 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div
+        ref={mapRef}
+        className="h-[55vh] min-h-96 scroll-mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      >
         <ItineraryMap
           days={geoDays}
           activeDay={active === "all" ? "all" : Number(active)}
