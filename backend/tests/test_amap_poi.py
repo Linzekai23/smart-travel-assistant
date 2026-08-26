@@ -259,7 +259,7 @@ def test_fishing_venues_filtered_from_restaurants(tmp_path):
     assert [i["name"] for i in out] == ["十八里家常鱼庄"]   # 鱼庄是餐厅，保留
 
 
-# ---------- 景点检索（110000 风景名胜） ----------
+# ---------- 景点检索（110000 风景名胜 + 140100 科教文化服务） ----------
 
 ATTRACTIONS_JSON = {
     "status": "1", "count": "20",
@@ -277,7 +277,7 @@ ATTRACTIONS_JSON = {
 
 
 def test_attractions_parse_and_filter():
-    """只保留风景名胜主分类；照片取第一张（不走 photo_picker）；URL 带 types=110000。"""
+    """只保留风景名胜主分类；照片取第一张（不走 photo_picker）；URL 带 types=110000+keywords=旅游。"""
     http = FakeHttp(payload=ATTRACTIONS_JSON)
     picker_calls = []
 
@@ -291,7 +291,10 @@ def test_attractions_parse_and_filter():
     assert item["address"] == "武侯祠大街231号" and item["tel"] == "028-85552965"
     assert item["photo_url"] == "https://a.amap.com/a1.jpg"   # 第一张
     assert picker_calls == []                                  # 景点不择优
-    assert "types=110000" in http.calls[0] and urllib.parse.quote("成都") in http.calls[0]
+    # 首个请求：风景名胜 + keywords=旅游（知名景点浮出的关键，实测六城教科书级）
+    assert "types=110000" in http.calls[0]
+    assert f"keywords={urllib.parse.quote('旅游')}" in http.calls[0]
+    assert urllib.parse.quote("成都") in http.calls[0]
 
 
 def test_attractions_photo_is_first_not_picked():
@@ -314,3 +317,109 @@ def test_attractions_status_fail_returns_empty():
     http = FakeHttp(payload={"status": "0", "info": "INVALID_USER_KEY"}, status=200)
     svc = AmapPoiService(http_get=http)
     assert svc.search_attractions("成都") == []
+
+
+def test_attractions_multi_category_type_passes_filter():
+    """多分类 type（购物服务|风景名胜）任一 | 分段命中主分类即保留（宽窄巷子景区回归）。"""
+    payload = {
+        "status": "1",
+        "pois": [
+            {"id": "M1", "name": "宽窄巷子景区",
+             "type": "购物服务;特色商业街;特色商业街|风景名胜;风景名胜相关;旅游景点",
+             "location": "104.059,30.669", "address": "宽窄巷子", "tel": "", "photos": []},
+            {"id": "M2", "name": "纯购物街", "type": "购物服务;特色商业街;特色商业街",
+             "location": "104.06,30.67", "address": "x", "tel": "", "photos": []},
+        ],
+    }
+    http = FakeHttp(payload=payload)
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_attractions("成都")
+    assert [i["name"] for i in out] == ["宽窄巷子景区"]  # 第二分类命中保留；纯购物不保留
+
+
+def test_attractions_merges_museums():
+    """景点双类型：风景名胜 + 科教文化服务（博物馆）合并，poi_id 去重，风景名胜在前。"""
+    scenic_payload = {"status": "1", "pois": [
+        {"id": "S1", "name": "武侯祠", "type": "风景名胜;名胜古迹",
+         "location": "104.05,30.65", "address": "x", "tel": "", "photos": []},
+    ]}
+    museum_payload = {"status": "1", "pois": [
+        {"id": "M1", "name": "成都武侯祠博物馆", "type": "科教文化服务;博物馆;博物馆",
+         "location": "104.049,30.646", "address": "武侯祠大街", "tel": "", "photos": []},
+        {"id": "S1", "name": "武侯祠(重复id)", "type": "科教文化服务;博物馆;博物馆",
+         "location": "104.05,30.65", "address": "x", "tel": "", "photos": []},
+        {"id": "M2", "name": "四川博物院", "type": "科教文化服务;博物馆;博物馆",
+         "location": "104.06,30.66", "address": "浣花溪", "tel": "", "photos": []},
+    ]}
+
+    class DispatchHttp:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def __call__(self, url, **kwargs):
+            self.calls.append(url)
+            if "types=140100" in url:
+                return FakeResponse(museum_payload)
+            return FakeResponse(scenic_payload)
+
+    http = DispatchHttp()
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_attractions("成都")
+    assert [i["name"] for i in out] == ["武侯祠", "成都武侯祠博物馆", "四川博物院"]
+    assert [i["poi_id"] for i in out] == ["amap-S1", "amap-M1", "amap-M2"]  # 重复 id 去重
+    assert "types=110000" in http.calls[0] and "types=140100" in http.calls[-1]
+    assert all(i["category"] == "attraction" for i in out)
+
+
+def test_attractions_keyword_enough_skips_fallback():
+    """keywords=旅游 结果 ≥5 条 → 不发无关键词兜底请求（共 2 次调用：关键词+博物馆）。"""
+    scenic_payload = {"status": "1", "pois": [
+        {"id": f"S{i}", "name": f"景点{i}", "type": "风景名胜;风景名胜",
+         "location": f"104.0{i},30.6{i}", "address": "x", "tel": "", "photos": []}
+        for i in range(6)]}
+
+    class DispatchHttp:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def __call__(self, url, **kwargs):
+            self.calls.append(url)
+            if "types=140100" in url:
+                return FakeResponse({"status": "1", "pois": []})
+            return FakeResponse(scenic_payload)
+
+    http = DispatchHttp()
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_attractions("成都")
+    assert len(out) == 6
+    assert len(http.calls) == 2  # 关键词查询 + 博物馆查询，无兜底
+
+
+def test_attractions_keyword_sparse_fills_fallback():
+    """keywords=旅游 结果不足 5 条 → 无关键词兜底补足（按 poi_id 去重）。"""
+    kw_payload = {"status": "1", "pois": [
+        {"id": "K1", "name": "关键词景点", "type": "风景名胜;风景名胜",
+         "location": "104.01,30.61", "address": "x", "tel": "", "photos": []}]}
+    fb_payload = {"status": "1", "pois": [
+        {"id": "F1", "name": "兜底景点A", "type": "风景名胜;风景名胜",
+         "location": "104.02,30.62", "address": "x", "tel": "", "photos": []},
+        {"id": "K1", "name": "关键词景点(重复)", "type": "风景名胜;风景名胜",
+         "location": "104.01,30.61", "address": "x", "tel": "", "photos": []}]}
+
+    class DispatchHttp:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def __call__(self, url, **kwargs):
+            self.calls.append(url)
+            if "keywords=" in url:
+                return FakeResponse(kw_payload)
+            if "types=140100" in url:
+                return FakeResponse({"status": "1", "pois": []})
+            return FakeResponse(fb_payload)
+
+    http = DispatchHttp()
+    svc = AmapPoiService(http_get=http)
+    out = svc.search_attractions("成都")
+    assert [i["name"] for i in out] == ["关键词景点", "兜底景点A"]
+    assert len(http.calls) == 3  # 关键词 + 兜底 + 博物馆

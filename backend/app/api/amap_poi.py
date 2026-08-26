@@ -21,9 +21,11 @@ AMAP_URL = "https://restapi.amap.com/v3/place/text"
 FOOD_TYPE = "050000"    # 餐饮服务
 HOTEL_TYPE = "100000"   # 住宿服务
 SCENIC_TYPE = "110000"  # 风景名胜（高德景点主分类，含公园/寺庙/景区等子类）
+MUSEUM_TYPE = "140100"  # 科教文化服务→博物馆/展览馆（武侯祠博物馆等名景点归此，非风景名胜）
 FOOD_MAIN = "餐饮服务"
 HOTEL_MAIN = "住宿服务"
 SCENIC_MAIN = "风景名胜"
+MUSEUM_MAIN = "科教文化服务"
 BRANCH_SUFFIX_RE = re.compile(r"[（(][^（()）]{0,10}店[）)]$")  # 分店后缀（观锦餐厅(天府新谷店)）
 FISHING_VENUE_RE = re.compile(r"垂钓|钓场|鱼塘|钓鱼")  # 垂钓园混入餐饮服务（如"丽江塘钓鱼"），不是吃饭的店
 MIN_PHOTO_SCORE = 100.0  # 照片"阳光指数"下限：低于此分判太暗/太灰，酒店换通用大堂图
@@ -114,21 +116,45 @@ class AmapPoiService:
         return self._search(city, HOTEL_TYPE, HOTEL_MAIN, "hotel")
 
     def search_attractions(self, city: str) -> list[dict]:
-        """真实景点候选（风景名胜主分类；无 key/失败/无结果 → []）。
+        """真实景点候选（风景名胜 keywords=旅游 + 博物馆/展览馆；无 key/失败 → []）。
 
+        实测（2026-08，北京/广州/成都/上海/西安/江门/佛山）：110000 无关键词查询的
+        排序严重劣化（北京前列是天主堂/清真寺，成都 20 条里没有任何知名景点）；
+        keywords=旅游 六城均返回教科书级结果（故宫/外滩/兵马俑/广州塔/都江堰）。
+        关键词匹配差的少数城市（结果 <5 条）→ 无关键词兜底补足。
+        武侯祠博物馆、三星堆等名景点在 140100 科教文化服务而非 110000 →
+        博物馆查询合并去重（风景名胜最多 10 条 + 博物馆最多 5 条）。
         复用 _search 全链路：主分类过滤、分店去重、坐标解析、照片取第一张、
-        10 条上限与全部降级防护。category="attraction" 对齐语料分类,
-        planner 据此将其纳入景点引用校验/零引用注入/enrich。
+        降级防护。category="attraction" 对齐语料分类，planner 据此将其纳入
+        景点引用校验/零引用注入/enrich。
         """
-        return self._search(city, SCENIC_TYPE, SCENIC_MAIN, "attraction")
+        scenic = self._search(city, SCENIC_TYPE, SCENIC_MAIN, "attraction", keywords="旅游")
+        if len(scenic) < 5:
+            fallback = self._search(city, SCENIC_TYPE, SCENIC_MAIN, "attraction", limit=5)
+            seen_scenic = {p["poi_id"] for p in scenic}
+            for p in fallback:
+                if p["poi_id"] not in seen_scenic:
+                    seen_scenic.add(p["poi_id"])
+                    scenic.append(p)
+        museums = self._search(city, MUSEUM_TYPE, MUSEUM_MAIN, "attraction", limit=5)
+        seen = {p["poi_id"] for p in scenic}
+        out = list(scenic)
+        for p in museums:
+            if p["poi_id"] not in seen:
+                seen.add(p["poi_id"])
+                out.append(p)
+        return out
 
-    def _search(self, city: str, poi_type: str, main_type: str, category: str) -> list[dict]:
+    def _search(self, city: str, poi_type: str, main_type: str, category: str,
+                limit: int = 10, keywords: str | None = None) -> list[dict]:
         key = os.environ.get("AMAP_KEY")
         if not key:
             return []  # 无 key：planner 走示例数据模式
-        q = urllib.parse.urlencode({
-            "key": key, "city": city, "citylimit": "true",
-            "offset": "20", "page": "1", "extensions": "all"})
+        params = {"key": key, "city": city, "citylimit": "true",
+                  "offset": "20", "page": "1", "extensions": "all"}
+        if keywords:
+            params["keywords"] = keywords
+        q = urllib.parse.urlencode(params)
         try:
             resp = self.http_get(f"{AMAP_URL}?{q}&types={poi_type}", timeout=8)
         except (requests.RequestException, TimeoutError, OSError):
@@ -144,7 +170,12 @@ class AmapPoiService:
         out: list[dict] = []
         seen: set[str] = set()
         for p in data.get("pois") or []:
-            if not isinstance(p, dict) or not str(p.get("type") or "").startswith(main_type):
+            if not isinstance(p, dict):
+                continue
+            # type 可能是多分类 "购物服务;...|风景名胜;...;旅游景点"：任一 | 分段
+            # 命中主分类即算景点（只查第一段会把宽窄巷子景区这类多分类 POI 误滤）
+            type_str = str(p.get("type") or "")
+            if not any(seg.startswith(main_type) for seg in type_str.split("|")):
                 continue  # 裸搜会混入其他分类（如美食结果里的住宿服务）
             name = str(p.get("name") or "").strip()
             if category == "restaurant" and (FISHING_VENUE_RE.search(name)
@@ -180,7 +211,7 @@ class AmapPoiService:
                 seen.add(base)  # 解析成功才占去重位（坏坐标不毒化去重链）
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue  # 坏条目跳过，好条目保留（不整轮失败）
-            if len(out) >= 10:
+            if len(out) >= limit:
                 break
         return out
 
