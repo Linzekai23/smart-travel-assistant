@@ -38,7 +38,10 @@ def _search(name, *, query=None, k=8):
 
 
 def _kwargs():
-    return {"weather_fn": fake_weather, "search_pois_fn": _search, "normalize_region_fn": _normalize}
+    # search_attractions_fn 默认返回 [] → 现有测试全部留在 RAG 路径
+    # （防本机 AMAP_KEY 使旧用例走真实高德 HTTP）
+    return {"weather_fn": fake_weather, "search_pois_fn": _search,
+            "normalize_region_fn": _normalize, "search_attractions_fn": lambda city: []}
 
 
 def test_researcher_candidates_weather_reason():
@@ -83,3 +86,83 @@ def test_researcher_no_candidates_uses_province_capital():
     assert out["region_resolved"] is True
     assert out["candidates"] == []
     assert out["weather"] and out["weather"][0]["source"] == "open-meteo"
+
+
+# ---- 高德景点优先 + RAG 兜底 ----
+
+AMAP_ATTRACTIONS = [
+    {"poi_id": "amap-B000A1", "name": "成都塔", "city": "成都", "category": "attraction",
+     "lat": 30.64, "lng": 104.05, "address": "锦江区", "tel": "028-1234567",
+     "photo_url": "https://amap.example/photo1.jpg"},
+    {"poi_id": "amap-B000A2", "name": "锦里古街", "city": "成都", "category": "attraction",
+     "lat": 30.648, "lng": 104.049, "address": "武侯区"},
+]
+
+
+def _amap_factory():
+    """search_attractions 的替身：每次返回全新 dict（_enrich 原地补 description/reason，
+    共享常量 dict 会被上一个用例污染，导致缺响应用例意外拿到残留字段）。"""
+    return [dict(p) for p in AMAP_ATTRACTIONS]
+
+
+def test_researcher_amap_priority():
+    """高德候选优先：description/reason 由"景点描述JSON"一次调用补写，
+    weather 锚定高德候选坐标，RAG search_pois_fn 不被调用。"""
+    fake = FakeProvider(json_responses={"景点描述JSON": {"items": [
+        {"name": "成都塔", "description": "锦江畔电视塔，登高俯瞰全城。", "reason": "地标必打卡"},
+        {"name": "锦里古街", "description": "三国主题仿古街，小吃云集。", "reason": "美食与民俗"},
+    ]}})
+    rag_calls = []
+
+    def rag(name, *, query=None, k=8):
+        rag_calls.append(name)
+        return list(CANDIDATES)
+
+    out = researcher.researcher_node(
+        _state(), fake, weather_fn=fake_weather, search_pois_fn=rag,
+        normalize_region_fn=_normalize, search_attractions_fn=lambda city: _amap_factory(),
+    )  # type: ignore[arg-type]
+    assert out["region_resolved"] is True
+    assert [p["poi_id"] for p in out["candidates"]] == ["amap-B000A1", "amap-B000A2"]
+    assert not rag_calls  # 高德命中 → RAG 不参与
+    assert out["candidates"][0]["description"] == "锦江畔电视塔，登高俯瞰全城。"
+    assert out["candidates"][0]["reason"] == "地标必打卡"
+    assert out["candidates"][1]["description"] == "三国主题仿古街，小吃云集。"  # 名称回填
+    # weather 锚定高德候选真实坐标
+    assert out["weather"] and out["weather"][0]["source"] == "open-meteo"
+
+
+def test_researcher_amap_empty_falls_back_to_rag():
+    """高德无结果（无 key/失败/无景点）→ RAG 语义检索兜底，行为与现状一致。"""
+    fake = _fake()
+    out = researcher.researcher_node(_state(), fake, **_kwargs())  # type: ignore[arg-type]
+    assert [p["poi_id"] for p in out["candidates"]] == ["guangzhou-001", "guangzhou-002"]
+    assert out["candidates"][0]["reason"] == "夜景绝佳，适合晚上登塔"
+
+
+def test_researcher_amap_llm_failure_keeps_candidates():
+    """高德候选 LLM 补写失败（无"景点描述JSON"响应）→ 候选原样保留，不抛异常。"""
+    out = researcher.researcher_node(
+        _state(), FakeProvider(), weather_fn=fake_weather, search_pois_fn=_search,
+        normalize_region_fn=_normalize, search_attractions_fn=lambda city: _amap_factory(),
+    )  # type: ignore[arg-type]
+    assert [p["poi_id"] for p in out["candidates"]] == ["amap-B000A1", "amap-B000A2"]
+    assert out["candidates"][0].get("description") in ("", None)  # 缺省不阻塞
+    assert out["candidates"][0].get("reason") in ("", None)
+
+
+def test_researcher_amap_province_only_skips_amap():
+    """用户只提到省份（city=None）→ 不调高德（需城市名），走 RAG 省检索。"""
+    state = _state()
+    state["profile"]["destination"] = "河北"
+    amap_calls = []
+
+    def normalize(name):
+        return ("河北", None) if "河北" in name else _normalize(name)
+
+    out = researcher.researcher_node(
+        state, FakeProvider(), weather_fn=fake_weather, search_pois_fn=_search,
+        normalize_region_fn=normalize, search_attractions_fn=lambda city: amap_calls.append(city) or _amap_factory(),
+    )  # type: ignore[arg-type]
+    assert amap_calls == []  # 无城市 → 高德不调用
+    assert out["region_resolved"] is True and out["candidates"] == []

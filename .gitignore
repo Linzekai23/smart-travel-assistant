@@ -17,8 +17,11 @@ dist/
 .env
 .env.local
 
-# RAG data（模型 / Chroma 向量库 / POI 语料，勿提交）
+# RAG data（模型 / 向量库 / POI 语料，勿提交）
 backend/data/
+
+# Claude Code 本机会话配置
+.claude/
 
 # IDE
 .idea/

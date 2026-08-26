@@ -257,3 +257,60 @@ def test_fishing_venues_filtered_from_restaurants(tmp_path):
     svc = AmapPoiService(http_get=http)
     out = svc.search_restaurants("成都")
     assert [i["name"] for i in out] == ["十八里家常鱼庄"]   # 鱼庄是餐厅，保留
+
+
+# ---------- 景点检索（110000 风景名胜） ----------
+
+ATTRACTIONS_JSON = {
+    "status": "1", "count": "20",
+    "pois": [
+        {"id": "B0FFA1", "name": "武侯祠", "type": "风景名胜;名胜古迹",
+         "location": "104.0489,30.6461", "address": "武侯祠大街231号", "tel": "028-85552965",
+         "photos": [{"url": "https://a.amap.com/a1.jpg"}, {"url": "https://a.amap.com/a2.jpg"}]},
+        {"id": "B0FFA2", "name": "某咖啡馆", "type": "餐饮服务;咖啡厅",
+         "location": "104.0600,30.6500", "address": "x", "tel": "", "photos": []},
+        {"id": "B0FFA3", "name": "锦里古街", "type": "风景名胜;文物古迹",
+         "location": "104.0490,30.6480", "address": "武侯祠大街", "tel": "",
+         "photos": []},
+    ],
+}
+
+
+def test_attractions_parse_and_filter():
+    """只保留风景名胜主分类；照片取第一张（不走 photo_picker）；URL 带 types=110000。"""
+    http = FakeHttp(payload=ATTRACTIONS_JSON)
+    picker_calls = []
+
+    svc = AmapPoiService(http_get=http, photo_picker=lambda urls: picker_calls.append(urls) or "x")
+    out = svc.search_attractions("成都")
+    assert [i["name"] for i in out] == ["武侯祠", "锦里古街"]  # 咖啡馆被主分类过滤
+    item = out[0]
+    assert item["poi_id"] == "amap-B0FFA1"
+    assert item["category"] == "attraction"
+    assert item["lat"] == 30.6461 and item["lng"] == 104.0489
+    assert item["address"] == "武侯祠大街231号" and item["tel"] == "028-85552965"
+    assert item["photo_url"] == "https://a.amap.com/a1.jpg"   # 第一张
+    assert picker_calls == []                                  # 景点不择优
+    assert "types=110000" in http.calls[0] and urllib.parse.quote("成都") in http.calls[0]
+
+
+def test_attractions_photo_is_first_not_picked():
+    """多张照片时景点取第一张；photo_picker 不被调用（与酒店区分）。"""
+    http = FakeHttp(payload=ATTRACTIONS_JSON)
+    svc = AmapPoiService(http_get=http, photo_picker=lambda urls: "picked")
+    out = svc.search_attractions("成都")
+    assert out[0]["photo_url"] == "https://a.amap.com/a1.jpg"
+
+
+def test_attractions_no_key_returns_empty(monkeypatch):
+    monkeypatch.delenv("AMAP_KEY")
+    http = FakeHttp(payload=ATTRACTIONS_JSON)
+    svc = AmapPoiService(http_get=http)
+    assert svc.search_attractions("成都") == []
+    assert http.calls == []  # 无 key 不发请求
+
+
+def test_attractions_status_fail_returns_empty():
+    http = FakeHttp(payload={"status": "0", "info": "INVALID_USER_KEY"}, status=200)
+    svc = AmapPoiService(http_get=http)
+    assert svc.search_attractions("成都") == []

@@ -93,3 +93,27 @@ def test_validate_description_null_normalized():
     bad = dict(good, name="描述为null", description=None)
     out = generate.validate_pois("北京", [good, bad])
     assert len(out) == 1 and out[0]["name"] == "故宫"
+
+
+def test_generate_province_existing_hints_prompt():
+    """增量扩量：已有 (city, name) 清单进 prompt，提示 LLM 避开（降低轮次间重复）。"""
+    fake = FakeProvider(json_responses={"四川": PROVINCE_RESPONSE})
+    generate.generate_province(fake, "四川",  # type: ignore[arg-type]
+                               existing={("成都", "宽窄巷子"), ("成都", "武侯祠"), ("北京", "故宫")})
+    user = fake.calls[0][-1]["content"]
+    assert "已有景点" in user and "成都·宽窄巷子" in user and "成都·武侯祠" in user
+    assert "北京·故宫" not in user  # 其他省的已有条目不进本省提示
+
+
+def test_merge_unique_filters_same_city_name():
+    """多轮累积去重：同城同名过滤；不同城市同名（如多地中山公园）允许共存；existing 同步更新。"""
+    a = {"city": "北京", "name": "故宫"}
+    b = {"city": "北京", "name": "天坛"}
+    c = {"city": "上海", "name": "中山公园"}
+    d = {"city": "北京", "name": "中山公园"}  # 同省不同市同名 → 不判重
+    existing = {("北京", "故宫")}
+    added = generate.merge_unique([a, b, c, d], existing)
+    assert [p["name"] for p in added] == ["天坛", "中山公园", "中山公园"]
+    assert ("北京", "天坛") in existing and ("上海", "中山公园") in existing
+    # 再次 merge 同一批 → 全部已存在，无新增
+    assert generate.merge_unique([a, b, c, d], existing) == []

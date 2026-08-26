@@ -43,12 +43,14 @@ PLANNER_SYSTEM_PROMPT = """你是智能旅行助手的"行程规划师"。根据
 - 景点必须从候选景点中选取并引用其 poi_id，不要编造景点
 - 每天必须至少安排 1-2 个候选景点并引用其 poi_id（不得将所有条目都标注（示例））；只有餐厅/酒店/购物点等非景点条目才允许标注（示例）且不带 poi_id
 - 餐厅/酒店条目必须从候选餐厅/酒店中选取并引用其 poi_id（真实商家）；仅当候选餐厅/酒店不足时才可编造并在名称后标注（示例）且不填 poi_id
+- 餐厅条目的 note/detail 只写该餐厅自身的菜品/口味/环境（10-30 字），严禁写入景点介绍、历史文化内容或任何景点名称
 - 同一 poi_id 全程只能引用一次（每家餐厅/酒店/景点只出现一次，不要多天重复安排同一家）
 - 酒店条目只能放进 accommodation 数组，不要作为每天 items 的条目（items 只放景点/餐饮/购物点）
 - 住宿推荐集中安排：优先选景点集中的区域住一家、覆盖整个行程（days 列全程天数），通勤方便；仅当某天景点与主住宿区距离确实较远（如跨市郊景区）才换第 2 家并在 commute_note 说明原因；住宿按预算约束的每晚住宿预算选档位
 - 雨天（condition 含 雨/雪/雷）优先安排室内景点
 - 尊重用户偏好标签（美食/购物/文化/自然/亲子），缺偏好时均衡安排
-- 天数以 duration_days 为准，不要多排"""
+- 天数以 duration_days 为准，不要多排
+- 最后一天（返程日）同样必须安排 items：返程前购物/自由活动/备选景点等 1-2 项（非景点条目允许标注（示例）且不带 poi_id），items 不得是空数组"""
 
 
 def build_candidate_context(candidates: list[dict]) -> str:
@@ -58,7 +60,14 @@ def build_candidate_context(candidates: list[dict]) -> str:
         if p.get("category") in ("restaurant", "hotel"):
             continue
         reason = f"，推荐理由：{p['reason']}" if p.get("reason") else ""
-        lines.append(f"- {p['name']}（{p['city']}，评分{p['rating']}，价位档{p['price_tier']}）: {p['description']}{reason}")
+        # 高德景点候选缺 rating/price_tier/description：有值才拼（防"评分None"与 KeyError）
+        meta = [str(p["city"])] if p.get("city") else []
+        if p.get("rating") is not None:
+            meta.append(f"评分{p['rating']}")
+        if p.get("price_tier") is not None:
+            meta.append(f"价位档{p['price_tier']}")
+        desc = p.get("description") or ""
+        lines.append(f"- {p['name']}（{'，'.join(meta)}）: {desc}{reason}")
     for label, category in (("候选餐厅（真实商家，从中引用 poi_id）:", "restaurant"),
                             ("候选酒店（真实商家，从中引用 poi_id）:", "hotel")):
         group = [p for p in candidates if p.get("category") == category]
@@ -165,10 +174,13 @@ def _save_detail_cache(cache: dict) -> None:
 
 
 def _clean_itinerary(itinerary: dict, candidate_ids: set,
-                     hotel_ids: set | None = None, hotel_names: set | None = None) -> None:
+                     hotel_ids: set | None = None, hotel_names: set | None = None,
+                     restaurant_ids: set | None = None,
+                     attraction_names: set | None = None) -> None:
     """幻觉清洗：有 poi_id 且不在候选集合 → 丢弃；无 poi_id → 保留（示例餐饮/住宿）；
     同一 poi_id 全程只保留第一次出现（LLM 会同一餐厅连选多天，如丽江塘钓鱼×5）；
-    引用候选酒店的条目丢弃（LLM 常把酒店当景点塞进每天 items，如太成宾馆）。"""
+    引用候选酒店的条目丢弃（LLM 常把酒店当景点塞进每天 items，如太成宾馆）；
+    餐厅条目混入景点内容（蓄联大饭店 → 川军抗战馆介绍回归）→ 剥掉 detail 与 note。"""
     seen: set[str] = set()
     for day in itinerary.get("days") or []:
         kept = []
@@ -184,6 +196,14 @@ def _clean_itinerary(itinerary: dict, candidate_ids: set,
                 continue  # 重复引用同一 POI
             if pid:
                 seen.add(pid)
+            # 餐厅条目 detail 里出现景点名 → LLM 把景点介绍写进了餐厅（name/poi_id
+            # 都是餐厅真实数据，只有 note/detail 是景点内容）→ 剥掉这两个字段，
+            # 餐厅卡片仍显示真实名称/地址/照片
+            if pid and pid in (restaurant_ids or set()):
+                detail = str(item.get("detail") or "")
+                if any(n and n in detail for n in (attraction_names or set())):
+                    item.pop("detail", None)
+                    item.pop("note", None)
             kept.append(item)
         day["items"] = kept
     if itinerary.get("accommodation") is not None:
@@ -269,6 +289,10 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
     hotel_ids = {p.get("poi_id") for p in candidates
                  if p.get("category") == "hotel" and p.get("poi_id")}
     hotel_names = {p.get("name") for p in candidates if p.get("category") == "hotel"}
+    restaurant_ids = {p.get("poi_id") for p in candidates
+                      if p.get("category") == "restaurant" and p.get("poi_id")}
+    attraction_names = {p.get("name") for p in candidates
+                        if p.get("category") == "attraction" and p.get("name")}
     itinerary = {}
     for attempt in range(2):
         try:
@@ -276,7 +300,8 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
         except (AssertionError, ValueError, KeyError, TypeError, RuntimeError):
             itinerary = {}
             break  # LLM 异常走既有降级路径（days-None 分支）
-        _clean_itinerary(itinerary, candidate_ids, hotel_ids, hotel_names)
+        _clean_itinerary(itinerary, candidate_ids, hotel_ids, hotel_names,
+                         restaurant_ids, attraction_names)
         if not itinerary.get("days") or _has_candidate_reference(itinerary, attraction_ids):
             break
         # 零引用兜底：追加纠正指令重试一次（无引用 = 地图空图，M5 冒烟实证 LLM 会
@@ -285,7 +310,7 @@ def planner_node(state: dict, llm: DeepSeekProvider) -> dict:
             "上一版行程没有引用任何候选景点的 poi_id，违反规则（每天必须至少安排 1-2 个"
             "候选景点并从候选列表中选择，景点条目必须填 poi_id 且严禁标注（示例），"
             "仅餐厅/酒店等非景点条目可标注（示例））。请重新输出行程 JSON，"
-            "景点 detail 用 80-120 字详细介绍。"
+            "景点 detail 用 150-250 字详细介绍。"
         )})
 
     # 兜底：两轮 LLM 均零引用候选 → 确定性逐天注入不同的候选景点（每天一个

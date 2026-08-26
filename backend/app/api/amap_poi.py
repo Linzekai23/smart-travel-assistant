@@ -20,8 +20,10 @@ from PIL import Image
 AMAP_URL = "https://restapi.amap.com/v3/place/text"
 FOOD_TYPE = "050000"    # 餐饮服务
 HOTEL_TYPE = "100000"   # 住宿服务
+SCENIC_TYPE = "110000"  # 风景名胜（高德景点主分类，含公园/寺庙/景区等子类）
 FOOD_MAIN = "餐饮服务"
 HOTEL_MAIN = "住宿服务"
+SCENIC_MAIN = "风景名胜"
 BRANCH_SUFFIX_RE = re.compile(r"[（(][^（()）]{0,10}店[）)]$")  # 分店后缀（观锦餐厅(天府新谷店)）
 FISHING_VENUE_RE = re.compile(r"垂钓|钓场|鱼塘|钓鱼")  # 垂钓园混入餐饮服务（如"丽江塘钓鱼"），不是吃饭的店
 MIN_PHOTO_SCORE = 100.0  # 照片"阳光指数"下限：低于此分判太暗/太灰，酒店换通用大堂图
@@ -111,6 +113,15 @@ class AmapPoiService:
     def search_hotels(self, city: str) -> list[dict]:
         return self._search(city, HOTEL_TYPE, HOTEL_MAIN, "hotel")
 
+    def search_attractions(self, city: str) -> list[dict]:
+        """真实景点候选（风景名胜主分类；无 key/失败/无结果 → []）。
+
+        复用 _search 全链路：主分类过滤、分店去重、坐标解析、照片取第一张、
+        10 条上限与全部降级防护。category="attraction" 对齐语料分类,
+        planner 据此将其纳入景点引用校验/零引用注入/enrich。
+        """
+        return self._search(city, SCENIC_TYPE, SCENIC_MAIN, "attraction")
+
     def _search(self, city: str, poi_type: str, main_type: str, category: str) -> list[dict]:
         key = os.environ.get("AMAP_KEY")
         if not key:
@@ -179,9 +190,11 @@ router = APIRouter()
 
 @router.get("/api/amap-poi")
 def amap_poi(city: str, type: str = "restaurant") -> dict:
-    """调试/演示：查目的地真实餐厅/酒店候选（type: restaurant|hotel）。"""
+    """调试/演示：查目的地真实候选（type: restaurant|hotel|attraction）。"""
     if type == "hotel":
         return {"items": service.search_hotels(city)}
+    if type == "attraction":
+        return {"items": service.search_attractions(city)}
     return {"items": service.search_restaurants(city)}
 
 

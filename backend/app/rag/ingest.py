@@ -1,4 +1,4 @@
-"""POI 语料入库：读取 JSONL → 校验 → 生成 poi_id → 向量化 → Chroma upsert。
+"""POI 语料入库：读取 JSONL → 校验 → 生成 poi_id → 向量化 → 向量库 upsert。
 
 用法：python -m app.rag.ingest
 （前置：python -m app.rag.download_model 下载 BGE 模型）

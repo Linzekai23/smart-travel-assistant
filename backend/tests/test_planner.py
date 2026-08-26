@@ -499,3 +499,105 @@ def test_clean_itinerary_drops_hotel_items_from_days():
                              hotel_ids={"amap-H1"}, hotel_names={"太成宾馆", "世代锦江国际酒店"})
     assert [i["name"] for i in itin["days"][0]["items"]] == ["宽窄巷子"]
     assert [a["poi_id"] for a in itin["accommodation"]] == ["amap-H1"]  # 住宿区保留
+
+
+def test_clean_itinerary_strips_attraction_content_from_restaurant_items():
+    """餐厅条目被 LLM 混入景点介绍（蓄联大饭店→川军抗战馆回归）→ 剥掉 detail 与 note，条目保留。"""
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "",
+                      "items": [{"name": "蓄联大饭店", "poi_id": "amap-R1",
+                                 "note": "了解川军历史，感受红色文化",
+                                 "detail": "川军抗战馆是为纪念川军出川抗战而建，馆内陈列大量历史照片。"},
+                                {"name": "小鱼洞冷水鱼庄", "poi_id": "amap-R2",
+                                 "note": "午餐", "detail": "特色冷水鱼，鲜嫩可口。"}]}],
+            "accommodation": [], "summary": "x", "warnings": []}
+    planner._clean_itinerary(itin, {"amap-R1", "amap-R2"},
+                             restaurant_ids={"amap-R1", "amap-R2"},
+                             attraction_names={"川军抗战馆", "莲花寺"})
+    items = itin["days"][0]["items"]
+    assert len(items) == 2
+    assert items[0]["name"] == "蓄联大饭店"          # 真实餐厅条目保留
+    assert "detail" not in items[0] and "note" not in items[0]  # 景点内容剥掉
+    assert items[1]["detail"] == "特色冷水鱼，鲜嫩可口。"  # 正常餐厅内容不动
+
+
+def test_planner_restaurant_item_contaminated_detail_cleaned(monkeypatch):
+    """端到端：LLM 给餐厅条目写了景点介绍 → 清洗剥掉，enrich 仍附餐厅真实地址。"""
+    monkeypatch.setattr(planner, "_amap_service", FakeAmap(restaurants=[AMAP_RESTAURANT]))
+    itin = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                      "items": [{"name": "广州塔", "poi_id": "guangzhou-001",
+                                 "note": "必去", "detail": "广州塔高600米。"},
+                                {"name": "马旺子·川小馆(太古里店)", "poi_id": "amap-B0FFH1",
+                                 "note": "了解红色历史",
+                                 "detail": "白云山是广州名山，绿树成荫。"}]}],
+            "accommodation": [], "summary": "OK", "warnings": []}
+    fake = FakeProvider(json_responses={"行程": itin})
+    out = planner.planner_node(_state(), fake)  # type: ignore[arg-type]
+    food = out["itinerary"]["days"][0]["items"][1]
+    assert food["name"] == "马旺子·川小馆(太古里店)"
+    assert "detail" not in food and "note" not in food  # 景点内容剥掉
+    assert food["address"] == "中纱帽街8号"  # enrich 仍附真实商家字段
+
+
+# ---- 高德景点候选（researcher 注入，planner 侧零改动沿用全链路）----
+
+AMAP_ATTRACTION = {"poi_id": "amap-B000A1", "name": "成都塔", "city": "成都",
+                   "category": "attraction", "lat": 30.64, "lng": 104.05,
+                   "address": "锦江区", "tel": "028-1234567",
+                   "photo_url": "https://amap.example/photo1.jpg",
+                   "description": "锦江畔电视塔，登高俯瞰全城。", "reason": "地标必打卡"}
+
+
+def test_planner_amap_attraction_reference_no_retry(monkeypatch):
+    """行程引用高德景点 poi_id（amap- 前缀）→ 引用成立不触发零引用重试，
+    enrich 附真实字段（坐标/地址/电话/照片/描述）。"""
+    amap = FakeAmap()
+    monkeypatch.setattr(planner, "_amap_service", amap)  # 候选 city=成都 → 美食/酒店各查一次
+    itin = {"days": [{"day": 1, "title": "成都", "weather_note": "晴",
+                      "items": [{"name": "成都塔", "poi_id": "amap-B000A1",
+                                 "note": "必去", "detail": "登顶看夜景"}]}],
+            "accommodation": [], "summary": "OK", "warnings": []}
+    fake = FakeProvider(json_responses={"行程": itin})
+    state = _state()
+    state["candidates"] = [AMAP_ATTRACTION]
+    out = planner.planner_node(state, fake)  # type: ignore[arg-type]
+    assert amap.calls == ["成都", "成都"]  # 高德美食/酒店检索照常（景点已在 candidates）
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "amap-B000A1"
+    assert item["category"] == "attraction"
+    assert item["lat"] == 30.64 and item["lng"] == 104.05
+    assert item["address"] == "锦江区" and item["tel"] == "028-1234567"
+    assert item["photo_url"] == "https://amap.example/photo1.jpg"
+    assert len(fake.calls) == 1  # 已引用候选 → 无纠正重试
+
+
+def test_build_candidate_context_missing_fields_no_keyerror():
+    """高德景点缺 rating/price_tier/description → 不拼"评分None/价位档None"、不 KeyError。"""
+    bare = {"poi_id": "amap-B000A2", "name": "锦里古街", "city": "成都",
+            "category": "attraction", "lat": 30.648, "lng": 104.049}
+    text = planner.build_candidate_context([bare])
+    assert "锦里古街" in text and "成都" in text
+    assert "None" not in text  # 无评分/价位/描述 → 无字段拼接（防"评分None"与 KeyError）
+    # 有值照常拼接（rating=0 也显示：float 0 不是 None）
+    full = {**bare, "rating": 0, "price_tier": 0, "description": "三国主题仿古街。", "reason": "美食多"}
+    text2 = planner.build_candidate_context([full])
+    assert "评分0" in text2 and "价位档0" in text2
+    assert "三国主题仿古街。" in text2 and "美食多" in text2
+
+
+def test_planner_zero_reference_injection_includes_amap_attraction():
+    """两轮 LLM 均零引用候选 → 确定性注入逐天取候选景点：高德景点同样可被注入。"""
+    zero_ref = {"days": [{"day": 1, "title": "x", "weather_note": "晴",
+                          "items": [{"name": "自由活动（示例）", "note": ""}]}],
+                "accommodation": [], "summary": "x", "warnings": []}
+    fake = FakeProvider(json_responses={
+        "行程规划JSON": zero_ref,
+        "上一版行程没有引用": zero_ref,
+        "景点补全": {"items": []}})
+    state = _state()
+    state["candidates"] = [AMAP_ATTRACTION]
+    out = planner.planner_node(state, fake)  # type: ignore[arg-type]
+    item = out["itinerary"]["days"][0]["items"][0]
+    assert item["poi_id"] == "amap-B000A1"   # 注入的高德景点
+    assert item["name"] == "成都塔"
+    assert item["category"] == "attraction"  # enrich 附类别
+    assert item["lat"] == 30.64              # enrich 附坐标

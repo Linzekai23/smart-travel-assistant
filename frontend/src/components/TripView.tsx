@@ -204,6 +204,12 @@ export default function TripView({ trip }: Props) {
           }
           styles={{ body: { paddingTop: 12 } }}
         >
+          {!d.items?.length ? (
+            // 当天无安排（如返程日 LLM 未排条目）：占位而非空白
+            <p className="text-sm text-slate-400">
+              当天为自由活动/返程日，无固定安排，可按喜好自行调整
+            </p>
+          ) : (
           <Timeline
             items={(d.items ?? []).map((it) => ({
               children: (
@@ -258,6 +264,7 @@ export default function TripView({ trip }: Props) {
               ),
             }))}
           />
+          )}
         </Card>
       ))}
 

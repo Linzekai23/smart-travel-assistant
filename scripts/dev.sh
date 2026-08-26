@@ -11,6 +11,15 @@ fail() { echo "❌ $1" >&2; exit 1; }
 
 [[ -d backend/.venv ]] || fail '后端未初始化：cd backend && python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"'
 [[ -d frontend/node_modules ]] || fail "前端未初始化：cd frontend && npm install"
+
+# 自动加载 backend/.env（若存在）：AMAP_KEY / DEEPSEEK_API_KEY 等注入本进程
+if [[ -f backend/.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source backend/.env
+  set +a
+fi
+
 [[ -n "${DEEPSEEK_API_KEY:-}" ]] || fail "未配置 DEEPSEEK_API_KEY：export DEEPSEEK_API_KEY=sk-xxx（DeepSeek 平台申请）"
 
 RAG_READY=false
@@ -33,7 +42,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> 启动后端 http://localhost:8000 与前端 http://localhost:5173（Ctrl+C 退出并停止两端）"
-(cd backend && .venv/Scripts/uvicorn app.main:app --port 8000) & UV_PID=$!
+(cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000) & UV_PID=$!
 (cd frontend && npm run dev) & VITE_PID=$!
 sleep 4
 cmd //c start http://localhost:5173

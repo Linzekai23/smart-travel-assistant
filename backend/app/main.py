@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import db
+from app.api.amap_route import router as amap_route_router
 from app.api.attraction_image import router as attraction_image_router
 from app.api.amap_poi import router as amap_poi_router
 from app.api.chat import router as chat_router
+from app.api.guide import router as guide_router
 from app.api.sse import router as sse_router
+from app.api.trips import router as trips_router
 from app.llm.deepseek import get_provider
 
 logger = logging.getLogger("travel-agent")
@@ -38,6 +41,9 @@ app.include_router(sse_router)
 app.include_router(chat_router)
 app.include_router(attraction_image_router)
 app.include_router(amap_poi_router)
+app.include_router(amap_route_router)
+app.include_router(guide_router)
+app.include_router(trips_router)
 
 
 @app.get("/api/health")

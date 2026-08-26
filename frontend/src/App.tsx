@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { App as AntdApp, Button } from "antd";
+import { SaveOutlined } from "@ant-design/icons";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
+import Checklist from "./components/Checklist";
 import EmptyState from "./components/EmptyState";
+import Guide from "./components/Guide";
+import Home from "./components/Home";
+import MyTrips from "./components/MyTrips";
 import TopBar from "./components/TopBar";
+import TransportPlanner from "./components/TransportPlanner";
 import TripView, { type Trip } from "./components/TripView";
+import type { View } from "./views";
 
 const SESSION_KEY = "travel_session_id";
 
 function App() {
+  // 系统视图：首页导航式切换；助手状态（messages/trip/session）保留在顶层，切走再回来不丢
+  const [view, setView] = useState<View>("home");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [trip, setTrip] = useState<Trip | null>(null);
   // session_id 持久化到 localStorage：刷新页面后恢复会话（历史消息 + 画像延续）
@@ -16,6 +26,28 @@ function App() {
   const [sending, setSending] = useState(false);
   // 请求纪元：handleReset 时 +1，过期请求的响应/错误一律丢弃，防止旧会话复活
   const epochRef = useRef(0);
+  const { message } = AntdApp.useApp();
+  const [saving, setSaving] = useState(false);
+
+  // 保存当前行程为快照（"我的行程"）；每次点击都是新建快照，助手会话模型不受影响
+  const handleSaveTrip = async () => {
+    if (!trip || saving) return;
+    setSaving(true);
+    try {
+      const title = trip.itinerary.days?.[0]?.title || "我的行程";
+      const resp = await fetch("/api/trips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, trip_json: trip }),
+      });
+      if (!resp.ok) throw new Error(`保存失败 (${resp.status})`);
+      message.success("已保存到我的行程");
+    } catch {
+      message.error("保存失败，请重试");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // 刷新后恢复历史消息与最新行程；失败（后端未启动/会话过期）静默降级为空会话
   useEffect(() => {
@@ -97,19 +129,46 @@ function App() {
 
   return (
     <div className="flex h-dvh flex-col bg-slate-50">
-      <TopBar hasSession={!!sessionId} onReset={handleReset} />
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside className="flex h-[45vh] w-full flex-col border-b border-slate-200 bg-white md:h-auto md:w-96 md:shrink-0 md:border-b-0 md:border-r">
-          <ChatPanel messages={messages} sending={sending} onSend={handleSend} />
-        </aside>
-        <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">
-          {trip ? (
-            <TripView trip={trip} />
-          ) : (
-            <EmptyState onTry={handleSend} />
-          )}
+      <TopBar
+        view={view}
+        onNavigate={setView}
+        hasSession={!!sessionId}
+        onReset={handleReset}
+      />
+      {view === "assistant" ? (
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <aside className="flex h-[45vh] w-full flex-col border-b border-slate-200 bg-white md:h-auto md:w-96 md:shrink-0 md:border-b-0 md:border-r">
+            <ChatPanel messages={messages} sending={sending} onSend={handleSend} />
+          </aside>
+          <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">
+            {trip ? (
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={saving}
+                    onClick={handleSaveTrip}
+                  >
+                    保存到我的行程
+                  </Button>
+                </div>
+                <TripView trip={trip} />
+              </div>
+            ) : (
+              <EmptyState onTry={handleSend} />
+            )}
+          </main>
+        </div>
+      ) : (
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          {view === "home" && <Home onNavigate={setView} />}
+          {view === "trips" && <MyTrips />}
+          {view === "transport" && <TransportPlanner />}
+          {view === "guide" && <Guide />}
+          {view === "checklist" && <Checklist />}
         </main>
-      </div>
+      )}
     </div>
   );
 }

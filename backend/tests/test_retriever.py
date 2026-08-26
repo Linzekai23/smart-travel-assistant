@@ -26,6 +26,11 @@ def test_normalize_region_city():
     assert retriever.normalize_region("guangzhou") == ("广东", "广州")
     assert retriever.normalize_region("成都") == ("四川", "成都")
     assert retriever.normalize_region("chengdu") == ("四川", "成都")
+    # 库外城市也解析出 (省, 市)——高德直搜佛山依赖此返回（不降级到省）
+    assert retriever.normalize_region("佛山") == ("广东", "佛山")
+    # 2026-08 城市全清单扩充：新增地级市同样可解析（攻略浏览下拉 + 高德直搜）
+    assert retriever.normalize_region("廊坊") == ("河北", "廊坊")
+    assert retriever.normalize_region("江门") == ("广东", "江门")
 
 
 def test_normalize_region_province():
